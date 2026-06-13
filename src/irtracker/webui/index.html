@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>iRacing Config Tracker</title>
+  <style>/*__STYLES__*/</style>
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <button class="icon-btn" id="navToggle" title="Show / hide menu" aria-label="Menu">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <div class="brand">
+        <span class="brand-mark">
+          <svg viewBox="0 0 24 24" class="ico-fill"><path d="M5 3h14a1 1 0 0 1 1 1v3H4V4a1 1 0 0 1 1-1zm-1 6h16v3H4V9zm0 5h16v3H4v-3zm1 5h14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z"/></svg>
+        </span>
+        <span class="brand-name">iRacing Config Tracker</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <div class="sim-chip" id="simChip" title="Whether iRacing is currently running"></div>
+      <button class="btn btn-primary" id="backupBtn">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M5 4h11l3 3v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M8 4v5h7"/><path d="M8 14h8"/></svg>
+        <span>Back Up Now</span>
+      </button>
+    </header>
+
+    <div class="layout" id="layout">
+      <nav class="sidebar" id="sidebar">
+        <button class="nav-item active" data-view="home">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+          <span>Home</span>
+        </button>
+        <button class="nav-item" data-view="history">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M3 4v6h6"/><path d="M3.5 10a9 9 0 1 1 .9 5"/><path d="M12 8v4l3 2"/></svg>
+          <span>Backup History</span>
+        </button>
+        <button class="nav-item" data-view="controls">
+          <svg viewBox="0 0 24 24" class="ico"><circle cx="12" cy="12" r="8"/><path d="M12 6v3M12 15v3M6 12h3M15 12h3"/></svg>
+          <span>Controls &amp; Devices</span>
+        </button>
+        <button class="nav-item" data-view="settings">
+          <svg viewBox="0 0 24 24" class="ico"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>
+          <span>Settings</span>
+        </button>
+        <div class="sidebar-foot">
+          <div class="sidebar-hint" id="sidebarHint"></div>
+        </div>
+      </nav>
+
+      <main class="content" id="content">
+        <div class="loading">Loading…</div>
+      </main>
+
+      <aside class="aside" id="aside"></aside>
+    </div>
+  </div>
+
+  <div class="toast-wrap" id="toastWrap"></div>
+  <div id="modalRoot"></div>
+
+  <script>/*__APP_JS__*/</script>
+</body>
+</html>

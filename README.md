@@ -30,6 +30,26 @@ python -m venv .venv
 pip install -e .[sim,toast]      # pyirsdk (car/track context) + winotify (toasts)
 ```
 
+## Desktop app (no command line needed)
+
+Prefer buttons to a terminal? Double-click **`start-gui.bat`** to open the
+friendly window — a plain-language dashboard for backing up, browsing history,
+restoring older versions, and viewing your controls and connected devices.
+No git knowledge required: snapshots are "backups", tags are "saved setups",
+diffs are "what changed".
+
+For a real native app window (rather than a browser tab), install the optional
+dependency once:
+
+```powershell
+pip install -e .[gui]      # adds pywebview; rides the built-in Edge WebView2
+```
+
+From a terminal it's `irtrack gui` (or the `irtrack-gui` script). Without
+`pywebview` installed it opens in your default browser instead — same app, same
+features. All the safety rules still apply: restores are blocked while the sim
+is running, and every restore auto-backs-up first.
+
 ## Quick start
 
 ```powershell

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "gui-preview",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["tools/preview_gui.py"],
+      "port": 8753
+    }
+  ]
+}

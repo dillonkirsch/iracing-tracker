@@ -429,6 +429,11 @@ def cmd_devices(args) -> int:
     return 0
 
 
+def cmd_gui(args) -> int:
+    from irtracker.gui import launch
+    return launch(args.config)
+
+
 def cmd_watcher(args) -> int:
     cfg = _load(args)
     from irtracker import tasksched, watcher as watcher_mod
@@ -575,6 +580,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p)
     p.add_argument("--base", help="controls.cfg to inspect (default: live file)")
     p.set_defaults(func=cmd_devices)
+
+    p = sub.add_parser("gui", help="open the friendly desktop app (native window or browser)")
+    _add_common(p)
+    p.set_defaults(func=cmd_gui)
 
     p = sub.add_parser("watcher", help="run or control the background watcher")
     _add_common(p)
