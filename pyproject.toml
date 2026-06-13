@@ -19,14 +19,21 @@ dependencies = [
 # Optional at runtime: the watcher degrades gracefully without them.
 sim = ["pyirsdk>=1.3"]
 toast = ["winotify>=1.1"]
+# Native app window for the GUI. Without it, `irtrack gui` falls back to the
+# browser, so this is optional.
+gui = ["pywebview>=5.0"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]
 irtrack = "irtracker.cli:main"
 gfcc = "irtracker.cli:gfcc_main"
+irtrack-gui = "irtracker.gui:launch"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+irtracker = ["webui/*.html", "webui/*.css", "webui/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
