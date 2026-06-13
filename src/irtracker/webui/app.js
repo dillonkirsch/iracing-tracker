@@ -4,13 +4,33 @@
 
 "use strict";
 
-/* ------------------------------------------------------------------ bridge */
+/* ------------------------------------------------------------------ bridge
+   Two transports: pywebview (native window) and fetch (browser fallback).
+   We decide ONCE at boot. Under pywebview we must never use a relative fetch
+   — the page is loaded via html= with no real origin, so the URL can't be
+   parsed. Instead we wait for the API method to finish injecting. */
+let TRANSPORT = null; // "pywebview" | "browser"
+
+function waitForApiMethod(method, timeoutMs = 10000) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    (function check() {
+      const a = window.pywebview && window.pywebview.api;
+      if (a && typeof a[method] === "function") return resolve(true);
+      if (Date.now() - t0 > timeoutMs) return resolve(false);
+      setTimeout(check, 70);
+    })();
+  });
+}
+
 async function api(method, ...args) {
   try {
-    if (window.pywebview && window.pywebview.api && window.pywebview.api[method]) {
+    if (TRANSPORT === "pywebview" || window.pywebview) {
+      const ready = await waitForApiMethod(method);
+      if (!ready) return { ok: false, error: "The app is still starting up — give it a moment and try again." };
       return await window.pywebview.api[method](...args);
     }
-    const res = await fetch("/api/" + method, {
+    const res = await fetch(new URL("/api/" + method, location.href).toString(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(args),
@@ -714,8 +734,14 @@ $("#backupBtn").addEventListener("click", doBackup);
 $("#navToggle").addEventListener("click", () => $("#layout").classList.toggle("nav-collapsed"));
 
 /* --------------------------------------------------------------- bootstrap */
+function hideBootScreen() {
+  const b = document.getElementById("bootScreen");
+  if (b) { b.classList.add("hide"); setTimeout(() => b.remove(), 400); }
+}
+
 async function init() {
   await loadOverview();
+  hideBootScreen();          // first data is in — drop the loading screen
   renderSimChip();
   render();
   // keep the sim chip + dashboard fresh
@@ -724,11 +750,21 @@ async function init() {
 
 (function boot() {
   let started = false;
-  const go = () => { if (!started) { started = true; init(); } };
+  const go = (transport) => { if (!started) { started = true; TRANSPORT = transport; init(); } };
+  // pywebview injects window.pywebview early; its api methods follow a beat
+  // later (api() waits for them). Its ready event is the most reliable signal.
+  if (window.pywebview) return go("pywebview");
+  window.addEventListener("pywebviewready", () => go("pywebview"), { once: true });
+  // The browser fallback serves this page over http(s) with a real origin;
+  // a pywebview html= page does not. So if nothing pywebview-ish has shown up
+  // shortly and we're on http, it's a real browser.
   let tries = 0;
   const iv = setInterval(() => {
-    if (window.pywebview && window.pywebview.api) { clearInterval(iv); go(); return; }
-    if (++tries > 6 && !window.pywebview) { clearInterval(iv); go(); } // ~700ms, no pywebview => browser
-  }, 110);
-  window.addEventListener("pywebviewready", () => { clearInterval(iv); go(); });
+    if (started) { clearInterval(iv); return; }
+    if (window.pywebview) { clearInterval(iv); return go("pywebview"); }
+    if (++tries > 5) {
+      clearInterval(iv);
+      go(location.protocol.startsWith("http") ? "browser" : "pywebview");
+    }
+  }, 100);
 })();
