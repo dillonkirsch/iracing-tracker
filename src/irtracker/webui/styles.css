@@ -353,6 +353,26 @@ body {
 .modal-input:focus { outline: none; border-color: var(--accent); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
 
+/* ---- boot / loading screen ---- */
+.boot {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(1000px 600px at 50% 32%, #14203c 0%, var(--bg) 60%);
+  transition: opacity .35s ease;
+}
+.boot.hide { opacity: 0; pointer-events: none; }
+.boot-inner { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.boot-logo { color: var(--accent); filter: drop-shadow(0 0 14px rgba(59,130,246,.5)); }
+.boot-logo svg { width: 48px; height: 48px; }
+.boot-title { font-size: 19px; font-weight: 700; letter-spacing: .3px; }
+.boot-spinner {
+  width: 32px; height: 32px; border-radius: 50%; margin-top: 4px;
+  border: 3px solid var(--line); border-top-color: var(--accent);
+  animation: spin .8s linear infinite;
+}
+.boot-text { color: var(--text-dim); font-size: 13px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
 .muted { color: var(--text-dim); }
 .mt-0 { margin-top: 0; }
 .row-gap { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }

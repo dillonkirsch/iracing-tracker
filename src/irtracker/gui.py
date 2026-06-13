@@ -79,7 +79,11 @@ class GuiApi:
         self._config_arg = config_arg
         self._cfg: Config | None = None
         self._cfg_error: str | None = None
-        self.window = None  # set by launch() when running under pywebview
+        # Underscore-prefixed on purpose: pywebview serializes the PUBLIC
+        # attributes of a js_api object into the JS bridge. A public reference
+        # to the native Window would make it walk the WinForms/WebView2 object
+        # and recurse forever (AccessibilityObject.Bounds.Empty.Empty...).
+        self._window = None  # set by launch() when running under pywebview
 
     # -- config / tracker access -------------------------------------------------
 
@@ -347,10 +351,10 @@ class GuiApi:
             return _err(self._cfg_error or "could not load configuration")
         default_name = f"iracing-config-{rev[:8]}.zip"
         dest: Path | None = None
-        if self.window is not None:
+        if self._window is not None:
             try:
                 import webview
-                picked = self.window.create_file_dialog(
+                picked = self._window.create_file_dialog(
                     webview.SAVE_DIALOG, save_filename=default_name,
                     file_types=("Zip archive (*.zip)",))
                 if not picked:
@@ -600,7 +604,7 @@ def _launch_pywebview(api: GuiApi) -> bool:
             WINDOW_TITLE, html=build_html(), js_api=api,
             width=1280, height=820, min_size=(960, 640),
             background_color="#0b1020")
-        api.window = window
+        api._window = window
         webview.start()
         return True
     except Exception as exc:
