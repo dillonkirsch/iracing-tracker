@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "bindings": [
+    { "action": "PitSpeedLimiter", "key": "p", "modifiers": ["alt"] },
+    { "action": "TearOffVisor", "key": "f6" },
+    { "action": "ToggleWindshieldWipers", "key": "w", "modifiers": ["shift"] }
+  ]
+}
