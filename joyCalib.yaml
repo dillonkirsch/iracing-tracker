@@ -1,0 +1,23 @@
+---
+CalibrationInfo:
+ DeviceList:
+ - DeviceName: 'Logitech G HUB G29 Driving Force Racing Wheel USB'
+   InstanceGUID: '{D94DE5E0-6276-11F1-8001-444553540000}'
+   ProductGUID: '{C24F046D-0000-0000-0000-504944564944}'
+   AxisList:
+   - Axis: 0
+     AxisName: 'Wheel axis'
+     CalibMin: 0
+     CalibCenter: 32772
+     CalibMax: 65535
+   - Axis: 2
+     AxisName: 'Brake'
+     CalibMin: 0
+     CalibCenter: 255
+     CalibMax: 255
+   - Axis: 3
+     AxisName: 'Accelerator'
+     CalibMin: 0
+     CalibCenter: 255
+     CalibMax: 255
+...
