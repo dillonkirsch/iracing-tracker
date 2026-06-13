@@ -1,0 +1,71 @@
+name: Build & Release
+
+# Builds the standalone Windows .exe and publishes a GitHub Release whenever you
+# push a version tag (v1.0.0, v1.2.3, ...). You can also run it by hand from the
+# Actions tab (workflow_dispatch) to test the build without cutting a release.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write        # needed to create the release and upload the .exe
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the app and build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[gui,sim,toast]"
+          python -m pip install pyinstaller
+
+      - name: Build the .exe
+        run: >
+          python -m PyInstaller --noconfirm --clean
+          --onefile --windowed
+          --name iRacingConfigTracker
+          --add-data "src/irtracker/webui;irtracker/webui"
+          --collect-all webview
+          --collect-all clr_loader
+          --collect-all pythonnet
+          --collect-all bottle
+          --collect-all proxy_tools
+          packaging/launcher.py
+
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        run: |
+          $exe = "dist/iRacingConfigTracker.exe"
+          (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower() + "  iRacingConfigTracker.exe" `
+            | Out-File -Encoding ascii "dist/iRacingConfigTracker.exe.sha256"
+
+      - name: Upload build artifact (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: iRacingConfigTracker
+          path: |
+            dist/iRacingConfigTracker.exe
+            dist/iRacingConfigTracker.exe.sha256
+          if-no-files-found: error
+
+      - name: Publish GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/iRacingConfigTracker.exe
+            dist/iRacingConfigTracker.exe.sha256

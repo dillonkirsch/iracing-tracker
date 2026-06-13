@@ -34,7 +34,16 @@ from irtracker.snapshot import SimRunningError, Tracker
 
 log = logging.getLogger(__name__)
 
-WEBUI_DIR = Path(__file__).resolve().parent / "webui"
+def _webui_dir() -> Path:
+    """Locate the bundled web assets, whether running from source or a
+    PyInstaller onefile build (assets extract to _MEIPASS/irtracker/webui)."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        return base / "irtracker" / "webui"
+    return Path(__file__).resolve().parent / "webui"
+
+
+WEBUI_DIR = _webui_dir()
 WINDOW_TITLE = "iRacing Config Tracker"
 
 
@@ -586,13 +595,19 @@ def _launch_pywebview(api: GuiApi) -> bool:
         import webview
     except ImportError:
         return False
-    window = webview.create_window(
-        WINDOW_TITLE, html=build_html(), js_api=api,
-        width=1280, height=820, min_size=(960, 640),
-        background_color="#0b1020")
-    api.window = window
-    webview.start()
-    return True
+    try:
+        window = webview.create_window(
+            WINDOW_TITLE, html=build_html(), js_api=api,
+            width=1280, height=820, min_size=(960, 640),
+            background_color="#0b1020")
+        api.window = window
+        webview.start()
+        return True
+    except Exception as exc:
+        # Any native-window failure (e.g. missing WebView2 runtime, a broken
+        # bundle) drops through to the browser transport rather than crashing.
+        log.warning("native window unavailable (%s); falling back to browser", exc)
+        return False
 
 
 class _BrowserBridge:
@@ -660,11 +675,17 @@ class _BrowserBridge:
 
 def launch(config_arg: str | None = None) -> int:
     api = GuiApi(config_arg)
-    if _launch_pywebview(api):
+    # IRTRACK_GUI_BROWSER forces the browser transport (skips the native window);
+    # IRTRACK_GUI_PORT / IRTRACK_GUI_NO_OPEN are mainly for testing.
+    force_browser = bool(os.environ.get("IRTRACK_GUI_BROWSER"))
+    if not force_browser and _launch_pywebview(api):
         return 0
-    print("(Tip: install the 'pywebview' package to get a real app window: "
-          "pip install pywebview)")
-    _BrowserBridge(api).serve()
+    if not force_browser:
+        print("(Tip: install the 'pywebview' package to get a real app window: "
+              "pip install pywebview)")
+    port = int(os.environ.get("IRTRACK_GUI_PORT") or 0)
+    open_browser = os.environ.get("IRTRACK_GUI_NO_OPEN") is None
+    _BrowserBridge(api).serve(port=port, open_browser=open_browser)
     return 0
 
 

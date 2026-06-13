@@ -47,8 +47,34 @@ pip install -e .[gui]      # adds pywebview; rides the built-in Edge WebView2
 
 From a terminal it's `irtrack gui` (or the `irtrack-gui` script). Without
 `pywebview` installed it opens in your default browser instead — same app, same
-features. All the safety rules still apply: restores are blocked while the sim
-is running, and every restore auto-backs-up first.
+features (force browser mode any time with `IRTRACK_GUI_BROWSER=1`). All the
+safety rules still apply: restores are blocked while the sim is running, and
+every restore auto-backs-up first.
+
+### Download or build the standalone .exe
+
+Each version tag triggers a GitHub Actions workflow
+([.github/workflows/release.yml](.github/workflows/release.yml)) that builds a
+self-contained `iRacingConfigTracker.exe` (PyInstaller, one file) and attaches
+it to a GitHub Release. End users just download and run it — no Python install
+needed (Windows 10/11; the native window rides the built-in Edge WebView2 and
+falls back to the browser otherwise). The exe is unsigned, so SmartScreen may
+say "More info → Run anyway" the first time.
+
+Cut a release:
+
+```powershell
+git tag v1.0.0
+git push origin v1.0.0      # Actions builds the exe and publishes the release
+```
+
+You can also trigger the workflow by hand from the **Actions** tab to build
+without releasing — the exe is saved as a downloadable build artifact. To build
+locally:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build-exe.ps1   # -> dist\iRacingConfigTracker.exe
+```
 
 ## Quick start
 
