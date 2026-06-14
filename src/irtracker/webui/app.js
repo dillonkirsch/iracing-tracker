@@ -234,6 +234,7 @@ function render() {
   const v = state.view;
   if (v === "home") return renderHome();
   if (v === "history") return renderHistory();
+  if (v === "profiles") return renderProfiles();
   if (v === "controls") return renderControls();
   if (v === "settings") return renderSettings();
 }
@@ -600,6 +601,84 @@ function renderDevicesAside() {
     <p class="section-label" style="margin-top:18px">Used in your controls</p>${referenced}`;
 }
 
+/* ============================================================== PROFILES */
+async function renderProfiles() {
+  const content = $("#content");
+  $("#aside").innerHTML = "";
+  content.innerHTML = `<div class="loading">Loading profiles…</div>`;
+  const r = await api("list_profiles");
+  const items = r.ok ? r.items : [];
+  content.innerHTML = `
+    <div class="page-head spread">
+      <div><h1 class="page-title">Profiles</h1>
+        <p class="page-sub">Named setups you can switch between in one click — e.g. “Oval”, “Road”, “VR”.</p></div>
+      <button class="btn btn-primary" data-action="save-profile">${icon("bookmark")} Save current setup…</button>
+    </div>
+    ${items.length ? items.map(profileCard).join("") : profilesEmpty()}`;
+}
+
+function profilesEmpty() {
+  return `<div class="empty">${icon("bookmark")}
+    <h3>No profiles yet</h3>
+    <p>Save your current iRacing setup as a named profile, then switch to it any time with one click — great for swapping between disciplines or rigs (oval vs road, VR vs triple-screen).</p>
+    <div style="margin-top:18px"><button class="btn btn-primary" data-action="save-profile">Save current setup as a profile…</button></div>
+  </div>`;
+}
+
+function profileCard(p) {
+  const when = p.date ? fmtDate(p.date) : "";
+  const ctx = p.contextLabel && p.contextLabel !== "manual edit" ? ` · ${esc(p.contextLabel)}` : "";
+  return `<div class="card" style="margin-bottom:12px">
+    <div class="spread">
+      <div>
+        <div style="font-weight:650;font-size:15px">${icon("bookmark")} ${esc(p.name)}</div>
+        <div class="muted" style="font-size:12.5px;margin-top:3px">${esc(when)}${esc(ctx)}</div>
+      </div>
+      <div class="row-gap">
+        <button class="btn btn-sm btn-primary" data-action="apply-profile" data-name="${esc(p.name)}">${icon("rotate")} Apply</button>
+        <button class="btn btn-sm btn-danger" data-action="delete-profile" data-name="${esc(p.name)}">Delete</button>
+      </div>
+    </div>
+    <div class="tl-files" style="margin-top:10px">${fileChips(p.files)}</div>
+  </div>`;
+}
+
+async function doSaveProfile() {
+  const name = await promptModal({
+    title: "Save current setup as a profile",
+    body: "Name it something memorable like “Oval”, “Road”, or “VR”. You can switch back to it any time.",
+    placeholder: "e.g. Road setup", confirmLabel: "Save profile",
+  });
+  if (!name) return;
+  const r = await api("save_current_as_profile", name);
+  toast(r.ok ? r.message : r.error, r.ok ? "good" : "bad");
+  if (r.ok) renderProfiles();
+}
+
+async function doApplyProfile(name) {
+  const ok = await confirmModal({
+    title: `Apply profile “${esc(name)}”?`,
+    body: `This sets your live iRacing files back to the <b>${esc(name)}</b> profile. A safety backup of your current setup is made first, so it's reversible.`,
+    confirmLabel: "Apply", danger: false,
+  });
+  if (!ok) return;
+  const r = await api("restore_baseline", name);
+  toast(r.ok ? r.message : r.error, r.ok ? "good" : "bad");
+  if (r.ok) await refreshAll();
+}
+
+async function doDeleteProfile(name) {
+  const ok = await confirmModal({
+    title: `Delete profile “${esc(name)}”?`,
+    body: "This removes the saved profile only. Your backups and live files are left untouched.",
+    confirmLabel: "Delete", danger: true,
+  });
+  if (!ok) return;
+  const r = await api("delete_profile", name);
+  toast(r.ok ? r.message : r.error, r.ok ? "good" : "bad");
+  if (r.ok) renderProfiles();
+}
+
 /* ============================================================== SETTINGS */
 function renderSettings() {
   const o = state.overview;
@@ -615,7 +694,16 @@ function renderSettings() {
     <div class="page-head"><h1 class="page-title">Settings</h1>
       <p class="page-sub">Control how your iRacing settings are protected.</p></div>
 
-    <p class="section-label">Automatic backups</p>
+    <p class="section-label">Health check</p>
+    <div class="card">
+      <div class="spread">
+        <p class="muted mt-0" style="font-size:12.5px">Confirm your backups, auto-backup, and the controls decoder are all working — before you ever need a restore.</p>
+        <button class="btn btn-sm btn-primary" data-action="run-health">${icon("shieldCheck")} Run health check</button>
+      </div>
+      <div id="healthResults"></div>
+    </div>
+
+    <p class="section-label" style="margin-top:22px">Automatic backups</p>
     <div class="card">
       <div class="toggle-row">
         <div><div class="label">Watch for changes right now</div>
@@ -713,6 +801,24 @@ async function doRemap(oldGuid, newGuid) {
   if (r.ok) { state.controls = null; state.devices = null; await refreshAll(); }
 }
 
+async function doHealthCheck() {
+  const box = document.getElementById("healthResults");
+  if (box) box.innerHTML = `<div class="loading" style="padding:16px">Running checks…</div>`;
+  const r = await api("run_health_check");
+  if (!box) return;
+  if (!r.ok) { box.innerHTML = `<p class="muted" style="margin-top:10px">${esc(r.error)}</p>`; return; }
+  const pill = (s) => s === "ok" ? `<span class="pill good"><span class="dot"></span>OK</span>`
+    : s === "warn" ? `<span class="pill warn"><span class="dot"></span>Check</span>`
+    : `<span class="pill bad"><span class="dot"></span>Problem</span>`;
+  const summary = r.fails ? `${r.fails} problem(s)${r.warns ? `, ${r.warns} warning(s)` : ""}`
+    : r.warns ? `All critical checks passed · ${r.warns} warning(s)`
+    : "All checks passed 🎉";
+  box.innerHTML = `<div style="margin-top:12px">
+    <div class="muted" style="font-size:12.5px;margin-bottom:6px">${esc(summary)}</div>
+    ${r.checks.map((c) => `<div class="kv"><span class="k">${esc(c.name)}<div class="file-desc">${esc(c.detail)}</div></span><span class="v">${pill(c.status)}</span></div>`).join("")}
+  </div>`;
+}
+
 async function onToggleWatch(e) {
   const on = e.target.checked;
   const o = state.overview;
@@ -736,7 +842,9 @@ async function onToggleAutostart(e) {
 async function refreshOverviewQuiet() {
   await loadOverview();
   renderSimChip();
-  if (state.view === "home" || state.view === "settings") render();
+  // Only the dashboard auto-refreshes; re-rendering Settings/Profiles/etc. would
+  // wipe in-progress UI (health-check results, scroll position, etc.).
+  if (state.view === "home") render();
 }
 
 async function refreshAll() {
@@ -764,6 +872,10 @@ document.addEventListener("click", (e) => {
   if (a === "bookmark") return doBookmark(rev);
   if (a === "export") return doExport(rev);
   if (a === "remap") return doRemap(btn.dataset.old, btn.dataset.new);
+  if (a === "save-profile") return doSaveProfile();
+  if (a === "apply-profile") return doApplyProfile(btn.dataset.name);
+  if (a === "delete-profile") return doDeleteProfile(btn.dataset.name);
+  if (a === "run-health") return doHealthCheck();
 });
 
 document.querySelectorAll(".nav-item").forEach((b) =>

@@ -16,6 +16,9 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 |---|---|
 | **Hardware re-map ("fix my wheel after a USB change")** | Repoints every binding **and** the pedal/wheel calibration from an old device instance GUID to the newly-connected one — across `controls.cfg` and `joyCalib.yaml`. One-click **"Re-map to connected device"** appears in the GUI's Devices panel whenever drift is detected, plus a `gfcc remap` CLI command (`--from/--to`, or `--auto` to detect it). A safety backup is taken first and the change is snapshotted. |
 | **Duplicate / conflicting binding detection** | Flags one input bound to multiple actions. Context-aware: ignores iRacing's intentional cross-context key reuse (camera tool vs driving), so it only reports genuine same-context collisions. Shows a banner + highlights the rows in the GUI's Controls tab, and lists them under `gfcc devices`. |
+| **Config profiles** | Named whole-setups ("Oval", "Road", "VR", "Triples") you swap with one click — a friendly layer over tags + `restore_baseline`. Dedicated **Profiles** tab to save the current setup as a profile, apply one (safety backup + sim-running guard), or delete. |
+| **Doctor / health check** | One-click validation of the whole setup — git, iRacing folder, writable backup store, backup history, tracked-file readability, controls decoder, sim/watcher/autostart state, optional deps — so you can confirm backups work *before* you need a restore. `irtrack doctor` CLI + a Health card in Settings. |
+| **App icon** | Custom app/exe/window/taskbar icon + favicon + loading-screen logo (replaces the default Python icon). |
 
 ---
 
@@ -25,7 +28,6 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 |---|---|---|---|
 | **In-app controls editor — keyboard binds** — click an action, press a key, save. | High | Medium | Encoder already supports keyboard patch mode (`apply_bindings`); mostly frontend. |
 | **In-app controls editor — FFB sliders** — strength / min-force / damping like the screenshot. | High | Hard | Blocked on reverse-engineering the opaque 147-byte `global_config_hex` blob. High payoff, real RE risk. |
-| **Config profiles** — named whole-setups ("Oval", "Road", "VR", "Triples") you swap with one click. | High | Easy–Med | Thin friendly layer over existing tags + `restore_baseline`. |
 | **Per-car / per-track configs** — separate config sets per car and/or track combo. | High | Hard | iRacing controls are largely global; needs careful modelling. Pairs with profiles. |
 | **Car setup (`.sto`) tracking** — version per-car/track setups with the same engine. | High | Medium | New tracked-file patterns; out of v1 scope but probably the #1 user ask. |
 
@@ -43,6 +45,7 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 | **Automatic iRacing build-upgrade detection** — record the active build per snapshot; auto-annotate + summarise what the seasonal update changed. | High | Med–Hard | Need a reliable source for the build version (file/registry — TBD). Great for "did I break it or did iRacing?". |
 | **Session outcome linking** — poll incidents / best lap at sim exit and store with the snapshot ("FFB I used for my Spa PB"). | Med | Medium | Already poll pyirsdk for car/track (FR-6); extend to results. |
 | **Configuration timeline** — high-level chronological view (snapshots, tags, restores, build upgrades) instead of raw commits. | Med | Easy–Med | View over the existing log; fits the GUI history tab. |
+| **Reverse input lookup ("what does this do?")** — press/enter a key or button and instantly see which action(s) it's bound to. | Med–High | Easy–Med | The decoder already maps actions→inputs; this is the inverse, reusing the bindings + conflict logic. Handy for "I pressed something — what was that?" and for finding a free key. |
 
 ---
 
@@ -50,7 +53,6 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 
 | Feature | Value | Effort | Foundation / notes |
 |---|---|---|---|
-| **Doctor / health check** — validate repo, watcher, file access, decoder, config, deps in one command, before you need a restore. | High | Easy–Med | Touches modules that already exist; mostly orchestration. |
 | **Config linter / sanity checker** — warn on out-of-bounds INI values (e.g. `maxWorkingSetMB_64` > physical RAM, stale VR keys) that cause stutter/crashes. | High | Medium | Needs a small rules table + system info (RAM). |
 | **Binding inventory** — human-readable list of every keyboard/wheel/pedal/button assignment. | Med | Easy | Codec already decodes; just format it. |
 | **Known-good restore points** — a dedicated "verified in use" designation separate from tags, with a one-click "revert to last known-good". | High | Easy | Special tag namespace + restore shortcut. |
@@ -75,7 +77,7 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 | Feature | Value | Effort | Foundation / notes |
 |---|---|---|---|
 | **Auto-update** — check GitHub Releases and offer to download the newer `.exe`. | Med | Medium | Releases are now automated per push — perfect fit. In-place exe swap on Windows is the fiddly part. |
-| **App icon + system-tray** — proper icon (currently default) and a tray presence with "Back up now" / status. | Med | Easy (icon) / Med (tray) | — |
+| **System-tray presence** — a tray icon with "Back up now" / status so it runs quietly in the background. (App icon itself: done.) | Med | Medium | App icon already shipped. |
 | **First-run wizard** — detect the iRacing folder, offer auto-backup, make the first baseline. | Med | Easy–Med | Detection + snapshot already exist. |
 | **Code-sign the exe** — kill the SmartScreen "unknown publisher" warning. | Med | Hard* | *Technically easy; needs a paid signing cert + process. |
 | **Cloud sync / multi-PC** — "back up to a private remote" button (survives reinstall; syncs PCs). | Med | Medium | Store is already a plain git repo. |

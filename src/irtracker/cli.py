@@ -515,6 +515,19 @@ def cmd_devices(args) -> int:
     return 0
 
 
+def cmd_doctor(args) -> int:
+    cfg = _load(args)
+    from irtracker.doctor import FAIL, OK, WARN, run_checks, summarize
+
+    mark = {OK: "[ OK ]", WARN: "[WARN]", FAIL: "[FAIL]"}
+    checks = run_checks(cfg)
+    for c in checks:
+        print(f"{mark.get(c.status, '[????]')} {c.name}: {c.detail}")
+    fails, warns = summarize(checks)
+    print(f"\n{len(checks)} checks - {fails} failed, {warns} warning(s)")
+    return 1 if fails else 0
+
+
 def cmd_gui(args) -> int:
     from irtracker.gui import launch
     return launch(args.config)
@@ -680,6 +693,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p)
     p.add_argument("--base", help="controls.cfg to inspect (default: live file)")
     p.set_defaults(func=cmd_devices)
+
+    p = sub.add_parser("doctor", help="health check: confirm backups, watcher, decoder, and deps are OK")
+    _add_common(p)
+    p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("gui", help="open the friendly desktop app (native window or browser)")
     _add_common(p)

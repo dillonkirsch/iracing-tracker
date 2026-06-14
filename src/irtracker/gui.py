@@ -19,6 +19,7 @@ import base64
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -57,6 +58,13 @@ def _ok(**data: Any) -> dict:
 
 def _err(message: str, **data: Any) -> dict:
     return {"ok": False, "error": message, **data}
+
+
+def _tag_slug(name: str) -> str:
+    """Turn a user-typed name into a valid git tag/ref (no spaces or special
+    chars). 'VR setup' -> 'VR-setup'."""
+    s = re.sub(r"[^A-Za-z0-9_-]+", "-", (name or "").strip())
+    return re.sub(r"-{2,}", "-", s).strip("-_")
 
 
 def _bits(value: int) -> list[int]:
@@ -328,14 +336,16 @@ class GuiApi:
         tracker = self._tracker()
         if tracker is None:
             return _err(self._cfg_error or "could not load configuration")
-        name = (name or "").strip()
-        if not name:
-            return _err("Please enter a name for this saved setup.")
+        slug = _tag_slug(name)
+        if not slug:
+            return _err("Please use letters or numbers for the name.")
+        if slug in {t[0] for t in tracker.repo.list_tags()}:
+            return _err(f"A saved setup named \"{slug}\" already exists.")
         try:
-            tracker.repo.create_tag(name, rev or "HEAD", (message or None))
+            tracker.repo.create_tag(slug, rev or "HEAD", (message or (name or "").strip()))
         except Exception as exc:
             return _err(str(exc))
-        return _ok(message=f"Saved this version as \"{name}\".")
+        return _ok(message=f"Saved this version as \"{slug}\".")
 
     def delete_tag(self, name: str) -> dict:
         tracker = self._tracker()
@@ -346,6 +356,62 @@ class GuiApi:
         except Exception as exc:
             return _err(str(exc))
         return _ok(message=f"Removed saved setup \"{name}\".")
+
+    # -- profiles (named whole-folder setups; built on tags + restore_baseline) --
+
+    def list_profiles(self) -> dict:
+        tracker = self._tracker()
+        if tracker is None:
+            return _err(self._cfg_error or "could not load configuration")
+        repo = tracker.repo
+        if not repo.initialized or not repo.head():
+            return _ok(items=[])
+        items = []
+        for name, commit, message in repo.list_tags():
+            entry = {"name": name, "rev": commit, "message": message,
+                     "date": None, "files": {}, "contextLabel": ""}
+            try:
+                s = repo.snapshot_at(commit)
+                entry["date"] = s.author_date
+                entry["files"] = self._files_clean(s.meta.files)
+                entry["contextLabel"] = s.meta.context_label()
+            except Exception:
+                pass
+            items.append(entry)
+        return _ok(items=items)
+
+    def save_current_as_profile(self, name: str) -> dict:
+        tracker = self._tracker()
+        if tracker is None:
+            return _err(self._cfg_error or "could not load configuration")
+        raw = (name or "").strip()
+        slug = _tag_slug(raw)
+        if not slug:
+            return _err("Please use letters or numbers for the profile name.")
+        if slug in {t[0] for t in tracker.repo.list_tags()}:
+            return _err(f"A profile named \"{slug}\" already exists.")
+        running = sim_running(tracker.cfg.sim_processes)
+        car = track = None
+        if running:
+            ctx = ContextCache(tracker.cfg.state_dir).context
+            car, track = ctx.car, ctx.track
+        result = tracker.take_snapshot("manual", message=f'profile "{raw}"',
+                                       sim_running=running, car=car, track=track)
+        rev = result.commit or tracker.repo.head()
+        if not rev:
+            return _err("There's nothing to save yet — your iRacing folder looks empty.")
+        try:
+            tracker.repo.create_tag(slug, rev, f'profile "{raw}"')
+        except Exception as exc:
+            return _err(str(exc))
+        return _ok(message=f'Saved your current setup as profile "{slug}".')
+
+    def apply_profile(self, name: str) -> dict:
+        """Apply a saved profile to the live folder (= restore that baseline)."""
+        return self.restore_baseline(name)
+
+    def delete_profile(self, name: str) -> dict:
+        return self.delete_tag(name)
 
     def export_backup(self, rev: str) -> dict:
         tracker = self._tracker()
@@ -613,6 +679,18 @@ class GuiApi:
         return _ok(message="Auto-backup resumed.")
 
     # -- misc --------------------------------------------------------------------
+
+    def run_health_check(self) -> dict:
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        from irtracker.doctor import run_checks, summarize
+
+        checks = run_checks(cfg)
+        fails, warns = summarize(checks)
+        return _ok(fails=fails, warns=warns,
+                   checks=[{"name": c.name, "status": c.status, "detail": c.detail}
+                           for c in checks])
 
     def open_folder(self, which: str) -> dict:
         cfg = self._config()
