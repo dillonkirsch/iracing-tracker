@@ -22,6 +22,11 @@ def corpus_cfg_bytes() -> bytes:
 
 
 @pytest.fixture
+def corpus_joycalib_text() -> str:
+    return (CORPUS / "joyCalib.yaml").read_text(encoding="utf-8")
+
+
+@pytest.fixture
 def cfg(tmp_path) -> Config:
     iracing = tmp_path / "iracing"
     iracing.mkdir()

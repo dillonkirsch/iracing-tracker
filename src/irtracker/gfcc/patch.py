@@ -27,7 +27,7 @@ import difflib
 import json
 from typing import Any
 
-from irtracker.gfcc.codec import GfccError
+from irtracker.gfcc.codec import GfccError, guid_from_str
 from irtracker.gfcc.keymap import VK_NAMES, mods_mask, mods_note, vk_for_name
 
 BINDINGS_VERSION = 1
@@ -98,3 +98,52 @@ def apply_bindings(doc: dict[str, Any], bindings: list[dict[str, Any]]) -> list[
         changes.append(f"{entry['name']}: {old} -> {entry['_key']}")
 
     return changes
+
+
+# -- device re-map (FR-23: USB-port change / hardware swap) ---------------------
+
+def _canon_guid(value: str) -> str:
+    """Normalize a GUID for comparison: strip braces/whitespace, upper-case."""
+    return str(value).strip().strip("{}").upper()
+
+
+def remap_device(doc: dict[str, Any], old_instance: str, new_instance: str) -> list[str]:
+    """Repoint every binding from one device *instance* GUID to another, in place.
+
+    This is the fix for iRacing forgetting your wheel/pedals after a USB-port
+    change or a new PC, where the device comes back with the same product GUID
+    but a new instance GUID. Product-GUID slots are left untouched. Returns the
+    names of the bindings that were moved.
+    """
+    old = _canon_guid(old_instance)
+    new = _canon_guid(new_instance)
+    if not old or not new:
+        raise BindingsError("both the old and new device GUIDs are required")
+    if old == new:
+        raise BindingsError("the old and new device GUIDs are identical")
+    guid_from_str(new)  # validate the destination is a well-formed GUID
+
+    changed: list[str] = []
+    for entry in doc["controls"]["entries"]:
+        moved = False
+        for i in range(3):
+            slot = entry.get(f"slot{i}")
+            if slot and _canon_guid(slot) == old:
+                entry[f"slot{i}"] = new
+                moved = True
+        if moved:
+            changed.append(entry["name"])
+    return changed
+
+
+def remap_joycalib(text: str, old_instance: str, new_instance: str) -> tuple[str, int]:
+    """Swap a device instance GUID inside joyCalib.yaml text, preserving all
+    other formatting/bytes so the calibration follows the binding re-map.
+    Returns (new_text, replacement_count)."""
+    import re
+
+    old = _canon_guid(old_instance)
+    new = _canon_guid(new_instance)
+    if not old or not new or old == new:
+        return text, 0
+    return re.subn(re.escape(old), new, text, flags=re.IGNORECASE)

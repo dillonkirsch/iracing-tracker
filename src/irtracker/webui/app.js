@@ -569,6 +569,11 @@ function renderDevicesAside() {
   const referenced = d.referenced.length
     ? d.referenced.map((x) => `<div class="dev"><div class="dev-name">${icon("wheel")} ${esc(deviceName(x))}</div>
         <div style="margin-top:6px">${presencePill(x.presence)}</div>
+        ${x.presence === "moved-port" && x.suggestedNewGuid
+          ? `<button class="btn btn-sm btn-primary" style="margin-top:9px;width:100%;justify-content:center"
+               data-action="remap" data-old="${esc(x.instanceGuid)}" data-new="${esc(x.suggestedNewGuid)}">
+               ${icon("rotate")} Re-map to connected device</button>`
+          : ""}
         <div class="dev-guid">${esc(x.instanceGuid)}</div></div>`).join("")
     : `<p class="muted" style="font-size:12.5px">Your controls file is keyboard-only.</p>`;
 
@@ -675,6 +680,21 @@ async function doExport(rev) {
   toast(r.message || "Exported.", "good");
 }
 
+async function doRemap(oldGuid, newGuid) {
+  const ok = await confirmModal({
+    title: "Re-map to your connected device?",
+    body: "Your wheel/pedals are showing up with a new ID — this usually happens after a " +
+      "USB-port change or a new PC. This points all your existing bindings (and pedal/wheel " +
+      "calibration) at the connected device, so you don't have to rebind everything in iRacing. " +
+      "A safety backup is made first, so it's reversible.",
+    confirmLabel: "Re-map", danger: false,
+  });
+  if (!ok) return;
+  const r = await api("remap_device", oldGuid, newGuid);
+  toast(r.ok ? r.message : r.error, r.ok ? "good" : "bad");
+  if (r.ok) { state.controls = null; state.devices = null; await refreshAll(); }
+}
+
 async function onToggleWatch(e) {
   const on = e.target.checked;
   const o = state.overview;
@@ -725,6 +745,7 @@ document.addEventListener("click", (e) => {
   if (a === "restore-file") return doRestoreFile(rev, file);
   if (a === "bookmark") return doBookmark(rev);
   if (a === "export") return doExport(rev);
+  if (a === "remap") return doRemap(btn.dataset.old, btn.dataset.new);
 });
 
 document.querySelectorAll(".nav-item").forEach((b) =>

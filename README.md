@@ -128,7 +128,15 @@ gfcc decode controls.cfg -o controls.json
 gfcc encode --base controls.cfg --bindings my_binds.json -o controls.new.cfg
 gfcc encode --base controls.cfg --bindings my_binds.json --install   # backup + install; refuses while sim runs
 gfcc devices                        # connected controllers vs what the file references
+gfcc remap --auto --install         # fix bindings after a USB-port change / new PC
+gfcc remap --from OLD_GUID --to NEW_GUID -o controls.new.cfg
 ```
+
+`remap` repoints every binding (and the matching `joyCalib.yaml` calibration)
+from an old device instance GUID to a new one — the fix for iRacing losing your
+wheel/pedal binds when the device returns under a new instance GUID. `--auto`
+detects a single drifted device from `gfcc devices`; the GUI exposes the same
+thing as a one-click **"Re-map to connected device"** button.
 
 `decode` emits documented JSON (round-trip verified byte-identical before
 anything is written). v1 `encode` is keyboard patch mode: it adds/replaces

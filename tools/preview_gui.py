@@ -20,18 +20,22 @@ sys.path.insert(0, str(ROOT / "src"))
 from irtracker.gui import GuiApi, _BrowserBridge  # noqa: E402
 
 PORT = 8753
-REF_FILES = ["app.ini", "controls.cfg", "core.ini", "fueldata.ini",
-             "joyCalib.yaml", "rendererDX11Monitor.ini"]
+# Source the throwaway "live" folder from the test corpus — the repo no longer
+# ships root-level personal config files.
+CORPUS = ROOT / "tests" / "corpus"
+REF_FILES = {
+    "controls.cfg": CORPUS / "controls.cfg",
+    "joyCalib.yaml": CORPUS / "joyCalib.yaml",
+}
 
 
 def _populate() -> str:
     tmp = Path(tempfile.mkdtemp(prefix="irtrack-preview-"))
     ira = tmp / "iRacing"; ira.mkdir()
     data = tmp / "data"; data.mkdir()
-    for n in REF_FILES:
-        src = ROOT / n
+    for name, src in REF_FILES.items():
         if src.exists():
-            shutil.copy2(src, ira / n)
+            shutil.copy2(src, ira / name)
     cfg_path = tmp / "config.toml"
     cfg_path.write_text(
         f'[paths]\niracing_dir = "{ira.as_posix()}"\n'
@@ -41,10 +45,12 @@ def _populate() -> str:
     api = GuiApi(str(cfg_path))
     api.backup_now("known-good baseline")
     # a second backup with a small edit so history + diffs have content
-    app = ira / "app.ini"
-    text = app.read_text(encoding="utf-8", errors="replace")
-    new = re.sub(r"=(\d+)", lambda m: f"={int(m.group(1)) + 1}", text, count=1)
-    app.write_text(new if new != text else text + "\nPreviewKey=1\n", encoding="utf-8")
+    jc = ira / "joyCalib.yaml"
+    if jc.exists():
+        text = jc.read_text(encoding="utf-8", errors="replace")
+        new = re.sub(r"(CalibCenter:\s*)(\d+)", lambda m: f"{m.group(1)}{int(m.group(2)) + 1}",
+                     text, count=1)
+        jc.write_text(new if new != text else text + "\n# preview tweak\n", encoding="utf-8")
     b = api.backup_now("after a small tweak")
     if b.get("rev"):
         api.create_tag("daytona-good", b["rev"], "known good at Daytona")

@@ -4,9 +4,15 @@ import json
 
 import pytest
 
+import re
+
 from irtracker.gfcc import codec
+from irtracker.gfcc.devices import references_from_decoded
 from irtracker.gfcc.keymap import MOD_ALT, MOD_CTRL, MOD_SHIFT, mods_mask
-from irtracker.gfcc.patch import BindingsError, apply_bindings, load_bindings
+from irtracker.gfcc.patch import (
+    BindingsError, apply_bindings, load_bindings, remap_device, remap_joycalib)
+
+_FAKE_GUID = "AAAAAAAA-1111-2222-3333-444444444444"
 
 
 def _bindings(*items):
@@ -97,3 +103,57 @@ def test_case_insensitive_action_lookup(corpus_cfg_bytes):
     doc = codec.decode_bytes(corpus_cfg_bytes)
     changes = apply_bindings(doc, _bindings({"action": "pitspeedlimiter", "key": "p"}))
     assert "PitSpeedLimiter" in changes[0]
+
+
+# -- device re-map (FR-23) -----------------------------------------------------
+
+def test_remap_device_moves_bindings_and_round_trips(corpus_cfg_bytes):
+    doc = codec.decode_bytes(corpus_cfg_bytes)
+    refs = references_from_decoded(doc)
+    assert refs, "corpus controls.cfg should reference a wheel/pedal device"
+    old = refs[0].instance_guid
+
+    changed = remap_device(doc, old, _FAKE_GUID)
+    assert changed, "re-map should move at least one binding"
+
+    out = codec.build(doc)
+    rebuilt = codec.decode_bytes(out)  # still valid + round-trips
+    # the old instance GUID is gone everywhere; the new one is present
+    slots = [rebuilt["controls"]["entries"][i].get(f"slot{j}")
+             for i in range(len(rebuilt["controls"]["entries"])) for j in range(3)]
+    assert old not in slots
+    assert _FAKE_GUID in slots
+
+
+def test_remap_device_is_byte_reversible(corpus_cfg_bytes):
+    doc = codec.decode_bytes(corpus_cfg_bytes)
+    old = references_from_decoded(doc)[0].instance_guid
+    remap_device(doc, old, _FAKE_GUID)
+    remap_device(doc, _FAKE_GUID, old)              # map back
+    assert codec.build(doc) == corpus_cfg_bytes      # identical to the original
+
+
+def test_remap_device_rejects_identical_guids():
+    with pytest.raises(BindingsError, match="identical"):
+        remap_device({"controls": {"entries": []}}, _FAKE_GUID, _FAKE_GUID)
+
+
+def test_remap_device_unknown_guid_is_a_noop(corpus_cfg_bytes):
+    doc = codec.decode_bytes(corpus_cfg_bytes)
+    changed = remap_device(doc, "DEADBEEF-0000-0000-0000-000000000000", _FAKE_GUID)
+    assert changed == []
+    assert codec.build(doc) == corpus_cfg_bytes
+
+
+def test_remap_joycalib_swaps_guid_and_reverses(corpus_joycalib_text):
+    text = corpus_joycalib_text
+    m = re.search(r"InstanceGUID:\s*'?\{?([0-9A-Fa-f]{8}-[0-9A-Fa-f-]{27})", text)
+    assert m, "corpus joyCalib.yaml should contain an InstanceGUID"
+    old = m.group(1)
+
+    new_text, n = remap_joycalib(text, old, _FAKE_GUID)
+    assert n >= 1
+    assert old.upper() not in new_text.upper()
+    assert _FAKE_GUID in new_text
+    back, _ = remap_joycalib(new_text, _FAKE_GUID, old)
+    assert back == text

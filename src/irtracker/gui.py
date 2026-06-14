@@ -28,9 +28,10 @@ from typing import Any
 from irtracker.config import SIDECAR_NAME, Config, config_path, load_config
 from irtracker.gfcc import codec
 from irtracker.gfcc.codec import GfccError
+from irtracker.gfcc.patch import remap_device, remap_joycalib
 from irtracker.repo import Snapshot
 from irtracker.simstate import ContextCache, sim_running
-from irtracker.snapshot import SimRunningError, Tracker
+from irtracker.snapshot import SimRunningError, Tracker, backup_live_file
 
 log = logging.getLogger(__name__)
 
@@ -481,20 +482,70 @@ class GuiApi:
                 return "moved-port"
             return "not-connected"
 
+        def referenced_dict(d) -> dict:
+            p = presence(d)
+            return {"name": d.name, "instanceGuid": d.instance_guid,
+                    "productGuid": d.product_guid, "note": d.note, "presence": p,
+                    # When the same hardware is connected under a new instance
+                    # GUID, this is the GUID to re-map onto (the one-click fix).
+                    "suggestedNewGuid": connected_products.get(d.product_guid) if p == "moved-port" else None}
+
         return _ok(
             connected=[{"name": d.name, "instanceGuid": d.instance_guid,
                         "productGuid": d.product_guid, "note": d.note}
                        for d in report.connected],
             enumError=report.enum_error,
-            referenced=[{"name": d.name, "instanceGuid": d.instance_guid,
-                         "productGuid": d.product_guid, "note": d.note,
-                         "presence": presence(d)}
-                        for d in report.referenced],
+            referenced=[referenced_dict(d) for d in report.referenced],
             calibrated=[{"name": d.name, "instanceGuid": d.instance_guid,
                          "productGuid": d.product_guid, "note": d.note,
                          "presence": presence(d)}
                         for d in report.calibrated],
         )
+
+    def remap_device(self, old_instance: str, new_instance: str) -> dict:
+        """Repoint every binding (and pedal/wheel calibration) from an old device
+        instance GUID to a newly-connected one -- the one-click fix for a wheel
+        that lost its binds after a USB-port change or PC swap."""
+        tracker = self._tracker()
+        if tracker is None:
+            return _err(self._cfg_error or "could not load configuration")
+        cfg = tracker.cfg
+        if sim_running(cfg.sim_processes):
+            return _err("Can't change your controls while iRacing is running. Close "
+                        "the sim (and the iRacing UI) first, then try again.", simBlocked=True)
+        controls = cfg.iracing_dir / "controls.cfg"
+        if not controls.exists():
+            return _err("No controls.cfg found in your iRacing folder.")
+        try:
+            doc = codec.decode_bytes(controls.read_bytes())
+            changed = remap_device(doc, old_instance, new_instance)
+            if not changed:
+                return _ok(changed=[], message="None of your bindings used that device "
+                           "-- nothing needed changing.")
+            out = codec.build(doc)
+            codec.decode_bytes(out)  # self-check before writing
+        except (OSError, GfccError, ValueError) as exc:
+            return _err(str(exc))
+        try:
+            backup_live_file(cfg, "controls.cfg")
+            controls.write_bytes(out)
+            jc_count = 0
+            jc = cfg.iracing_dir / "joyCalib.yaml"
+            if jc.exists():
+                new_text, jc_count = remap_joycalib(
+                    jc.read_text(encoding="utf-8", errors="replace"), old_instance, new_instance)
+                if jc_count:
+                    backup_live_file(cfg, "joyCalib.yaml")
+                    jc.write_text(new_text, encoding="utf-8")
+            tracker.take_snapshot("manual", names={"controls.cfg", "joyCalib.yaml"},
+                                  message="re-mapped device to the connected controller")
+        except Exception as exc:  # pragma: no cover - filesystem edge cases
+            return _err(str(exc))
+        msg = f"Re-mapped {len(changed)} binding(s) to the connected device."
+        if jc_count:
+            msg += " Pedal/wheel calibration was moved across too."
+        msg += " A safety backup of the previous files was made first."
+        return _ok(changed=changed, joycalibUpdated=jc_count, message=msg)
 
     # -- auto-backup (watcher) ---------------------------------------------------
 

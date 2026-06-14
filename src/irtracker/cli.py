@@ -17,7 +17,7 @@ from irtracker import __version__, semdiff
 from irtracker.config import SIDECAR_NAME, Config, config_path, load_config, setup_logging
 from irtracker.gfcc import codec
 from irtracker.gfcc.codec import GfccError
-from irtracker.gfcc.patch import apply_bindings, load_bindings
+from irtracker.gfcc.patch import apply_bindings, load_bindings, remap_device, remap_joycalib
 from irtracker.repo import TRIGGER_LABELS, GitError, Snapshot
 from irtracker.simstate import ContextCache, sim_running
 from irtracker.snapshot import SimRunningError, Tracker, backup_live_file
@@ -368,6 +368,81 @@ def cmd_encode(args) -> int:
     return 0
 
 
+def cmd_remap(args) -> int:
+    """Repoint bindings from an old device instance GUID to a new one (FR-23):
+    the fix for a wheel/pedals coming back on a new instance after a USB-port
+    change or hardware swap."""
+    cfg = None
+    base_path = Path(args.base) if args.base else None
+    if base_path is None:
+        cfg = _load(args)
+        base_path = cfg.iracing_dir / "controls.cfg"
+    try:
+        base = base_path.read_bytes()
+    except OSError as exc:
+        return _fail(str(exc))
+    try:
+        doc = codec.decode_bytes(base)
+    except GfccError as exc:
+        return _fail(f"cannot decode {base_path}: {exc}")
+
+    old, new = args.src, args.dst
+    if args.auto:
+        from irtracker.gfcc.devices import build_report
+
+        report = build_report(doc, None)
+        connected = {d.product_guid: d.instance_guid for d in report.connected}
+        connected_guids = {d.instance_guid for d in report.connected}
+        drifted = [(d.instance_guid, connected[d.product_guid]) for d in report.referenced
+                   if d.instance_guid not in connected_guids and d.product_guid in connected]
+        if not drifted:
+            return _fail("no drifted device found to auto-remap "
+                         "(nothing referenced is connected under a new instance GUID)")
+        if len(drifted) > 1:
+            return _fail("multiple drifted devices; rerun with explicit --from/--to")
+        old, new = drifted[0]
+        print(f"auto-detected device drift: {old} -> {new}")
+    if not old or not new:
+        return _fail("specify --from OLD --to NEW (or --auto to detect it)")
+
+    try:
+        changed = remap_device(doc, old, new)
+        out_bytes = codec.build(doc)
+        codec.decode_bytes(out_bytes)  # self-check
+    except GfccError as exc:
+        return _fail(str(exc))
+    if not changed:
+        print(f"no bindings reference {old}; nothing to change")
+        return 0
+    print(f"re-mapped {len(changed)} binding(s): {', '.join(changed)}")
+
+    if not args.out and not args.install:
+        return _fail("specify -o OUTPUT or --install")
+    if args.out:
+        Path(args.out).write_bytes(out_bytes)
+        print(f"wrote {args.out} ({len(out_bytes)} bytes)")
+    if args.install:
+        cfg = cfg or _load(args)
+        if sim_running(cfg.sim_processes):
+            return _fail("install is blocked while the sim is running (FR-24)")
+        target = cfg.iracing_dir / "controls.cfg"
+        backup = backup_live_file(cfg, "controls.cfg")
+        target.write_bytes(out_bytes)
+        print(f"installed to {target}")
+        if backup:
+            print(f"previous file backed up to {backup}")
+        jc = cfg.iracing_dir / "joyCalib.yaml"
+        if jc.exists():
+            text = jc.read_text(encoding="utf-8", errors="replace")
+            new_text, n = remap_joycalib(text, old, new)
+            if n:
+                backup_live_file(cfg, "joyCalib.yaml")
+                jc.write_text(new_text, encoding="utf-8")
+                print(f"updated joyCalib.yaml ({n} calibration GUID reference(s))")
+        print("note: final validation is loading it in the sim")
+    return 0
+
+
 def cmd_devices(args) -> int:
     from irtracker.gfcc.devices import build_report
 
@@ -576,6 +651,20 @@ def build_parser() -> argparse.ArgumentParser:
                         "(refused while the sim runs)")
     p.set_defaults(func=cmd_encode)
 
+    p = sub.add_parser("remap",
+                       help="repoint bindings from an old device GUID to a new one "
+                            "(fix a wheel/pedals after a USB-port change or PC swap)")
+    _add_common(p)
+    p.add_argument("--base", help="controls.cfg to patch (default: live file)")
+    p.add_argument("--from", dest="src", metavar="OLD_GUID", help="old device instance GUID")
+    p.add_argument("--to", dest="dst", metavar="NEW_GUID", help="new device instance GUID")
+    p.add_argument("--auto", action="store_true",
+                   help="auto-detect a single drifted device and remap it")
+    p.add_argument("-o", "--out", help="output path for the patched file")
+    p.add_argument("--install", action="store_true",
+                   help="back up and install into the live folder (refused while the sim runs)")
+    p.set_defaults(func=cmd_remap)
+
     p = sub.add_parser("devices", help="list connected controllers and referenced devices")
     _add_common(p)
     p.add_argument("--base", help="controls.cfg to inspect (default: live file)")
@@ -608,12 +697,14 @@ def main(argv: list[str] | None = None) -> int:
 def gfcc_main(argv: list[str] | None = None) -> int:
     """`gfcc` alias: codec commands only (requirements section 7)."""
     argv = list(sys.argv[1:] if argv is None else argv)
-    allowed = {"decode", "encode", "devices"}
+    allowed = {"decode", "encode", "devices", "remap"}
     if not argv or argv[0] in ("-h", "--help"):
-        print("usage: gfcc {decode,encode,devices} ...\n"
+        print("usage: gfcc {decode,encode,devices,remap} ...\n"
               "       gfcc decode controls.cfg -o controls.json\n"
               "       gfcc encode --base controls.cfg --bindings my_binds.json -o controls.new.cfg\n"
-              "       gfcc encode --base controls.cfg --bindings my_binds.json --install")
+              "       gfcc encode --base controls.cfg --bindings my_binds.json --install\n"
+              "       gfcc remap --auto --install            # fix a wheel after a USB-port change\n"
+              "       gfcc remap --from OLD_GUID --to NEW_GUID -o controls.new.cfg")
         return 0
     if argv[0] not in allowed:
         print(f"error: gfcc supports {sorted(allowed)}; use `irtrack` for everything else",
