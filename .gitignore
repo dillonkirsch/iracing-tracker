@@ -7,3 +7,19 @@ venv/
 build/
 dist/
 *.spec
+
+# Editors / local tooling
+.idea/
+.vscode/
+.claude/
+
+# Personal iRacing config copies — these belong in Documents\iRacing, not the
+# repo. (The intentional test fixtures under tests/corpus/ are NOT affected,
+# since these patterns are anchored to the repo root.)
+/app.ini
+/camera.ini
+/controls.cfg
+/core.ini
+/fueldata.ini
+/joyCalib.yaml
+/rendererDX11*.ini
