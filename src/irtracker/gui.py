@@ -15,6 +15,7 @@ JS bridge in app.js auto-detects which transport it's running under.
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -640,12 +641,19 @@ class GuiApi:
 # -- HTML assembly ---------------------------------------------------------------
 
 def build_html() -> str:
-    """Inline styles.css and app.js into index.html so the page is a single,
-    self-contained document (works identically under pywebview and a browser)."""
+    """Inline styles.css, app.js and the logo into index.html so the page is a
+    single, self-contained document (works identically under pywebview and a
+    browser)."""
     html = (WEBUI_DIR / "index.html").read_text(encoding="utf-8")
     css = (WEBUI_DIR / "styles.css").read_text(encoding="utf-8")
     js = (WEBUI_DIR / "app.js").read_text(encoding="utf-8")
-    return html.replace("/*__STYLES__*/", css).replace("/*__APP_JS__*/", js)
+    logo_uri = ""
+    logo = WEBUI_DIR / "logo.png"
+    if logo.exists():
+        logo_uri = "data:image/png;base64," + base64.b64encode(logo.read_bytes()).decode("ascii")
+    return (html.replace("/*__STYLES__*/", css)
+                .replace("/*__APP_JS__*/", js)
+                .replace("__LOGO_URI__", logo_uri))
 
 
 # -- launchers -------------------------------------------------------------------

@@ -33,7 +33,7 @@ irtrack-gui = "irtracker.gui:launch"
 where = ["src"]
 
 [tool.setuptools.package-data]
-irtracker = ["webui/*.html", "webui/*.css", "webui/*.js"]
+irtracker = ["webui/*.html", "webui/*.css", "webui/*.js", "webui/*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -17,6 +17,7 @@ $py = if (Test-Path ".venv\Scripts\python.exe") { ".venv\Scripts\python.exe" } e
 & $py -m PyInstaller --noconfirm --clean `
   --onefile --windowed `
   --name iRacingConfigTracker `
+  --icon packaging/icon.ico `
   --add-data "src/irtracker/webui;irtracker/webui" `
   --collect-all webview `
   --collect-all clr_loader `
