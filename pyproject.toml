@@ -13,6 +13,7 @@ dependencies = [
     "watchdog>=4.0",
     "psutil>=5.9",
     "PyYAML>=6.0",
+    "fpdf2>=2.7",
 ]
 
 [project.optional-dependencies]

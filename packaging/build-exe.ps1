@@ -24,6 +24,7 @@ $py = if (Test-Path ".venv\Scripts\python.exe") { ".venv\Scripts\python.exe" } e
   --collect-all pythonnet `
   --collect-all bottle `
   --collect-all proxy_tools `
+  --collect-all fpdf `
   packaging\launcher.py
 
 Write-Host ""

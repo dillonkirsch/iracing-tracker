@@ -400,6 +400,7 @@ async function renderHistory() {
       <p class="page-sub">Every saved version of your settings. Click one to see what changed or to restore it.</p></div>
       <button class="btn btn-sm" data-action="compare-now">${icon("rotate")} What’s changed since last backup?</button>
     </div>
+    ${compareCard()}
     <input class="search" id="histSearch" placeholder="Filter by car, track, file, or words in the note…">
     <div class="timeline" id="timeline"></div>`;
 
@@ -487,6 +488,56 @@ async function compareNow() {
   if (!r.files.length) { body.innerHTML = `<div class="empty" style="padding:30px 10px">${icon("shieldCheck")}<p>Nothing has changed since your last backup.</p></div>`; return; }
   body.innerHTML = `<div class="card" style="padding:14px;margin-bottom:12px"><div class="spread"><span class="muted" style="font-size:12.5px">${r.files.length} file(s) differ from your last backup</span><button class="btn btn-sm btn-primary" data-action="backup">Back up now</button></div></div>` +
     r.files.map((f) => `<div class="diff-file"><h4>${esc(fileLabel(f.name))}</h4><div class="diff-body">${colorizeDiff(f.body)}</div></div>`).join("");
+}
+
+function compareCard() {
+  const optList = (sel) => state.history.map((s, i) =>
+    `<option value="${esc(s.rev)}"${i === sel ? " selected" : ""}>${esc(triggerLabel(s.trigger))} — ${esc(fmtDate(s.date))}${s.tags.length ? " [" + s.tags.map(esc).join(", ") + "]" : ""}</option>`).join("");
+  const aSel = state.history.length > 1 ? 1 : 0;
+  return `<div class="card" style="margin-bottom:16px">
+    <p class="section-label mt-0">Compare two backups</p>
+    <div class="row-gap" style="align-items:flex-end">
+      <label style="flex:1;min-width:200px"><div class="file-desc" style="margin-bottom:4px">This backup</div>
+        <select class="search" id="cmpA" style="margin-bottom:0">${optList(aSel)}</select></label>
+      <label style="flex:1;min-width:200px"><div class="file-desc" style="margin-bottom:4px">…compared with</div>
+        <select class="search" id="cmpB" style="margin-bottom:0"><option value="__live__">Now (live folder)</option>${optList(0)}</select></label>
+      <button class="btn btn-primary" data-action="run-compare">Compare</button>
+    </div>
+    <div id="cmpResult"></div>
+  </div>`;
+}
+
+async function doRunCompare() {
+  const aEl = $("#cmpA"), bEl = $("#cmpB");
+  if (!aEl || !bEl) return;
+  const a = aEl.value, b = bEl.value;
+  const la = aEl.selectedOptions[0].textContent.trim();
+  const lb = bEl.selectedOptions[0].textContent.trim();
+  const box = $("#cmpResult");
+  box.innerHTML = `<div class="loading" style="padding:16px">Comparing…</div>`;
+  const r = await api("get_comparison", a, b, la, lb);
+  if (!r.ok) { box.innerHTML = `<p class="muted" style="margin-top:10px">${esc(r.error)}</p>`; return; }
+  state.lastCompare = { a, b, la, lb };
+  if (!r.files.length) {
+    box.innerHTML = `<div class="empty" style="padding:24px 10px">${icon("shieldCheck")}<p>No differences between these two.</p></div>`;
+    return;
+  }
+  box.innerHTML = `
+    <div class="spread" style="margin:16px 0 8px">
+      <div class="section-label mt-0">${r.files.length} file${r.files.length > 1 ? "s" : ""} changed</div>
+      <button class="btn btn-sm btn-primary" data-action="export-compare">${icon("doc")} Export PDF</button>
+    </div>
+    ${r.files.map((f) => `<div class="diff-file"><h4>${esc(fileLabel(f.name))}</h4><div class="diff-body">${colorizeDiff(f.body)}</div></div>`).join("")}`;
+}
+
+async function doExportCompare() {
+  const c = state.lastCompare;
+  if (!c) return;
+  toast("Building PDF…");
+  const r = await api("export_comparison_pdf", c.a, c.b, c.la, c.lb);
+  if (!r.ok) { toast(r.error, "bad"); return; }
+  if (r.cancelled) return;
+  toast(r.message || "Saved PDF.", "good");
 }
 
 /* ====================================================== CONTROLS & DEVICES */
@@ -728,16 +779,28 @@ function renderSettings() {
       </div>`).join("")}
     </div>
 
-    <p class="section-label" style="margin-top:22px">Folders &amp; info</p>
+    <p class="section-label" style="margin-top:22px">Folders</p>
     <div class="card">
-      <div class="kv"><span class="k">iRacing folder</span><span class="v">${esc(o.iracingDir)}</span></div>
-      <div class="kv"><span class="k">Where backups are stored</span><span class="v">${esc(o.dataDir)}</span></div>
-      <div class="kv"><span class="k">Settings file</span><span class="v">${esc(o.configPath)}</span></div>
-      <div class="row-gap" style="margin-top:12px">
+      <div style="font-weight:600">iRacing folder</div>
+      <div class="file-desc">Where your live iRacing config files live.</div>
+      <div class="row-gap" style="margin-top:6px">
+        <input class="search" id="setIracing" style="margin-bottom:0;flex:1;min-width:220px" value="${esc(o.iracingDir)}">
+        <button class="btn btn-sm" data-action="browse-iracing">Browse…</button>
+      </div>
+      <div style="font-weight:600;margin-top:14px">Where backups are stored</div>
+      <div class="file-desc">The folder that holds your backup history. Point it at a synced/cloud folder for offsite copies.</div>
+      <div class="row-gap" style="margin-top:6px">
+        <input class="search" id="setData" style="margin-bottom:0;flex:1;min-width:220px" value="${esc(o.dataDir)}">
+        <button class="btn btn-sm" data-action="browse-data">Browse…</button>
+      </div>
+      <label class="row-gap" style="margin-top:12px;cursor:pointer;font-size:13px"><input type="checkbox" id="setMove" checked> Move my existing backups to the new folder</label>
+      <div class="row-gap" style="margin-top:14px">
+        <button class="btn btn-primary btn-sm" data-action="save-settings">${icon("shieldCheck")} Save settings</button>
         <button class="btn btn-sm" data-action="open-iracing">${icon("folder")} Open iRacing folder</button>
         <button class="btn btn-sm" data-action="open-data">${icon("folder")} Open backup folder</button>
         <button class="btn btn-sm" data-action="open-config">${icon("doc")} Open settings file</button>
       </div>
+      <p class="sidebar-hint" style="margin-top:12px">Settings file: ${esc(o.configPath)}</p>
     </div>`;
 
   $("#tgWatch").addEventListener("change", onToggleWatch);
@@ -819,6 +882,34 @@ async function doHealthCheck() {
   </div>`;
 }
 
+async function doBrowse(inputId) {
+  const r = await api("pick_folder");
+  if (!r.ok) { toast(r.error, "bad"); return; }
+  if (r.cancelled || !r.path) return;
+  const el = document.getElementById(inputId);
+  if (el) el.value = r.path;
+}
+
+async function doSaveSettings() {
+  const ira = $("#setIracing").value.trim();
+  const data = $("#setData").value.trim();
+  const move = $("#setMove").checked;
+  const o = state.overview;
+  if (o && data && data !== o.dataDir) {
+    const ok = await confirmModal({
+      title: "Change where backups are stored?",
+      body: move
+        ? `Backups will be stored in:<br><b>${esc(data)}</b><br><br>Your existing backups will be <b>moved</b> there.`
+        : `New backups will be stored in:<br><b>${esc(data)}</b><br><br>(Existing backups stay where they are.)`,
+      confirmLabel: "Save", danger: false,
+    });
+    if (!ok) return;
+  }
+  const r = await api("update_settings", ira || null, data || null, move);
+  toast(r.ok ? r.message : r.error, r.ok ? "good" : "bad");
+  if (r.ok) { await loadOverview(); renderSimChip(); render(); }
+}
+
 async function onToggleWatch(e) {
   const on = e.target.checked;
   const o = state.overview;
@@ -876,6 +967,11 @@ document.addEventListener("click", (e) => {
   if (a === "apply-profile") return doApplyProfile(btn.dataset.name);
   if (a === "delete-profile") return doDeleteProfile(btn.dataset.name);
   if (a === "run-health") return doHealthCheck();
+  if (a === "run-compare") return doRunCompare();
+  if (a === "export-compare") return doExportCompare();
+  if (a === "browse-iracing") return doBrowse("setIracing");
+  if (a === "browse-data") return doBrowse("setData");
+  if (a === "save-settings") return doSaveSettings();
 });
 
 document.querySelectorAll(".nav-item").forEach((b) =>

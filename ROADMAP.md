@@ -19,6 +19,8 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 | **Config profiles** | Named whole-setups ("Oval", "Road", "VR", "Triples") you swap with one click — a friendly layer over tags + `restore_baseline`. Dedicated **Profiles** tab to save the current setup as a profile, apply one (safety backup + sim-running guard), or delete. |
 | **Doctor / health check** | One-click validation of the whole setup — git, iRacing folder, writable backup store, backup history, tracked-file readability, controls decoder, sim/watcher/autostart state, optional deps — so you can confirm backups work *before* you need a restore. `irtrack doctor` CLI + a Health card in Settings. |
 | **App icon** | Custom app/exe/window/taskbar icon + favicon + loading-screen logo (replaces the default Python icon). |
+| **Compare any two backups + PDF export** | Pick any two backups (or "Now (live)") in History → one aggregated, colour-coded diff with the summary at the top; **Export PDF** produces a clean report (logo, summary first, per-file detail). |
+| **Editable folders** | Change the iRacing folder and where backups are stored from Settings (with a native folder picker), optionally moving existing backups; saved back to `config.toml`. |
 
 ---
 
@@ -37,7 +39,6 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 
 | Feature | Value | Effort | Foundation / notes |
 |---|---|---|---|
-| **Compare any two snapshots/tags** in the GUI ("known-good vs today", "since season start") — one aggregated report. | High | Easy | `get_diff` backend already supports arbitrary pairs; just needs a picker UI. |
 | **Session change report** — what changed during a given driving session (car/track context already captured). | High | Easy–Med | `SnapshotMeta` already stores car/track/trigger. |
 | **Config blame** — "when did this setting last change?" with value, time, trigger, car/track, notes. | High | Medium | Walk git history per key. |
 | **Configuration history search** — find every snapshot where a key/section/action/value changed. | Med | Medium | Same history-walk machinery as blame. |

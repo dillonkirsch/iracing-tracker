@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -65,6 +66,24 @@ def _tag_slug(name: str) -> str:
     chars). 'VR setup' -> 'VR-setup'."""
     s = re.sub(r"[^A-Za-z0-9_-]+", "-", (name or "").strip())
     return re.sub(r"-{2,}", "-", s).strip("-_")
+
+
+def _update_config_paths(text: str, iracing_dir: str, data_dir: str) -> str:
+    """Rewrite the iracing_dir/data_dir values in a config.toml's [paths] table,
+    preserving the rest of the file (comments and other settings)."""
+    if not text.strip():
+        text = "[paths]\n"
+    for key, val in (("iracing_dir", iracing_dir), ("data_dir", data_dir)):
+        line = f'{key} = "{val.replace(chr(92), "/")}"'
+        pat = re.compile(rf"^[ \t]*{key}[ \t]*=.*$", re.M)
+        if pat.search(text):
+            text = pat.sub(lambda m, l=line: l, text, count=1)
+        elif re.search(r"^\[paths\]", text, re.M):
+            text = re.sub(r"^(\[paths\][ \t]*\n)", lambda m, l=line: m.group(1) + l + "\n",
+                          text, count=1, flags=re.M)
+        else:
+            text = f"[paths]\n{line}\n" + text
+    return text
 
 
 def _bits(value: int) -> list[int]:
@@ -258,6 +277,76 @@ class GuiApi:
             if body.strip():
                 files.append({"name": name, "body": body})
         return _ok(files=files)
+
+    def _comparison_files(self, rev_a: str, rev_b: str | None,
+                          label_a: str, label_b: str) -> list[dict]:
+        """Semantic diff between any two backups (rev_b None/'live' = live folder)."""
+        tracker = self._tracker()
+        if tracker is None:
+            raise RuntimeError(self._cfg_error or "could not load configuration")
+        repo, cfg = tracker.repo, tracker.cfg
+        live = rev_b in (None, "", "live", "__live__")
+        names = set(repo.files_at(rev_a))
+        if live:
+            names |= set(cfg.tracked_files_present())
+        else:
+            names |= set(repo.files_at(rev_b))
+        names.discard(SIDECAR_NAME)
+        files = []
+        for name in sorted(names):
+            old = repo.show_file(rev_a, name) if repo.file_exists_at(rev_a, name) else None
+            if live:
+                p = cfg.iracing_dir / name
+                new = p.read_bytes() if p.exists() else None
+            else:
+                new = repo.show_file(rev_b, name) if repo.file_exists_at(rev_b, name) else None
+            if old == new:
+                continue
+            body = self._semantic(name, old, new, label_a, label_b)
+            if body.strip():
+                files.append({"name": name, "body": body})
+        return files
+
+    def get_comparison(self, rev_a: str, rev_b: str | None,
+                       label_a: str = "A", label_b: str = "B") -> dict:
+        try:
+            files = self._comparison_files(rev_a, rev_b, label_a, label_b)
+        except Exception as exc:
+            return _err(str(exc))
+        return _ok(files=files, changedCount=len(files), labelA=label_a, labelB=label_b)
+
+    def export_comparison_pdf(self, rev_a: str, rev_b: str | None,
+                              label_a: str = "A", label_b: str = "B") -> dict:
+        try:
+            files = self._comparison_files(rev_a, rev_b, label_a, label_b)
+        except Exception as exc:
+            return _err(str(exc))
+        try:
+            from irtracker import report
+            pdf = report.build_comparison_pdf(label_a, label_b, files, WEBUI_DIR / "logo.png")
+        except Exception as exc:
+            return _err(f"Couldn't build the PDF: {exc}")
+        default_name = "iracing-config-comparison.pdf"
+        dest: Path | None = None
+        if self._window is not None:
+            try:
+                import webview
+                picked = self._window.create_file_dialog(
+                    webview.SAVE_DIALOG, save_filename=default_name,
+                    file_types=("PDF document (*.pdf)",))
+                if not picked:
+                    return _ok(cancelled=True)
+                dest = Path(picked if isinstance(picked, str) else picked[0])
+            except Exception as exc:  # pragma: no cover
+                log.warning("save dialog failed (%s); falling back to Desktop", exc)
+        if dest is None:
+            desktop = Path.home() / "Desktop"
+            dest = (desktop if desktop.is_dir() else Path.home()) / default_name
+        try:
+            dest.write_bytes(pdf)
+        except OSError as exc:
+            return _err(str(exc))
+        return _ok(path=str(dest), message=f"Saved comparison PDF to {dest}")
 
     def _file_diff(self, repo, name, rev_a, rev_b, label_a, label_b) -> str:
         old = repo.show_file(rev_a, name) if rev_a and repo.file_exists_at(rev_a, name) else None
@@ -691,6 +780,65 @@ class GuiApi:
         return _ok(fails=fails, warns=warns,
                    checks=[{"name": c.name, "status": c.status, "detail": c.detail}
                            for c in checks])
+
+    def pick_folder(self) -> dict:
+        """Open a native folder picker (pywebview only)."""
+        if self._window is None:
+            return _err("The folder picker isn't available here — type the path instead.")
+        try:
+            import webview
+            picked = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+        except Exception as exc:  # pragma: no cover
+            return _err(str(exc))
+        if not picked:
+            return _ok(cancelled=True)
+        return _ok(path=picked if isinstance(picked, str) else picked[0])
+
+    def update_settings(self, iracing_dir: str | None = None,
+                        data_dir: str | None = None, move_existing: bool = True) -> dict:
+        """Change the iRacing folder and/or where backups are stored, persisting
+        to config.toml. Optionally moves existing backups to the new location."""
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        new_ira = Path(iracing_dir).expanduser() if iracing_dir else cfg.iracing_dir
+        new_data = Path(data_dir).expanduser() if data_dir else cfg.data_dir
+        if not new_ira.is_dir():
+            return _err(f"That iRacing folder doesn't exist:\n{new_ira}")
+
+        moved = False
+        if str(new_data.resolve()) != str(cfg.data_dir.resolve()):
+            if move_existing and cfg.data_dir.exists():
+                if (new_data / "repo").exists():
+                    return _err("The chosen folder already contains backups. Pick an "
+                                "empty folder, or turn off \"move my existing backups\".")
+                try:
+                    if new_data.exists():
+                        for child in cfg.data_dir.iterdir():
+                            shutil.move(str(child), str(new_data / child.name))
+                    else:
+                        new_data.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(cfg.data_dir), str(new_data))
+                    moved = True
+                except Exception as exc:
+                    return _err(f"Couldn't move your backups: {exc}")
+
+        path = Path(self._config_arg) if self._config_arg else config_path()
+        try:
+            existing = path.read_text(encoding="utf-8-sig") if path.exists() else ""
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_update_config_paths(existing, str(new_ira), str(new_data)),
+                            encoding="utf-8")
+        except OSError as exc:
+            return _err(f"Couldn't save the settings file: {exc}")
+
+        self._cfg = None  # force reload with the new paths
+        self._cfg_error = None
+        msg = "Settings saved."
+        if moved:
+            msg += " Your existing backups were moved to the new folder."
+        return _ok(message=msg, moved=moved,
+                   iracingDir=str(new_ira), dataDir=str(new_data))
 
     def open_folder(self, which: str) -> dict:
         cfg = self._config()
