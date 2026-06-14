@@ -397,10 +397,15 @@ class GuiApi:
             return _ok(available=False, source=source,
                        error=f"This controls file couldn't be read in detail ({exc}). "
                              f"Your backups still keep it safely.")
+        from irtracker.gfcc.analyze import find_binding_conflicts
+
         bindings = self._bindings(doc)
+        conflicts = [{"kind": c.kind, "label": c.label, "actions": c.actions}
+                     for c in find_binding_conflicts(doc)]
         return _ok(
             available=True, source=source,
             bindings=bindings,
+            conflicts=conflicts,
             boundCount=sum(1 for b in bindings if b["kind"] != "unbound"),
             ffbNote="Force-feedback strength and pedal calibration are stored in "
                     "this file, but live inside an encoded block that isn't "

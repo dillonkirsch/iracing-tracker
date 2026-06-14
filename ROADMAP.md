@@ -15,6 +15,7 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 | Feature | Notes |
 |---|---|
 | **Hardware re-map ("fix my wheel after a USB change")** | Repoints every binding **and** the pedal/wheel calibration from an old device instance GUID to the newly-connected one — across `controls.cfg` and `joyCalib.yaml`. One-click **"Re-map to connected device"** appears in the GUI's Devices panel whenever drift is detected, plus a `gfcc remap` CLI command (`--from/--to`, or `--auto` to detect it). A safety backup is taken first and the change is snapshotted. |
+| **Duplicate / conflicting binding detection** | Flags one input bound to multiple actions. Context-aware: ignores iRacing's intentional cross-context key reuse (camera tool vs driving), so it only reports genuine same-context collisions. Shows a banner + highlights the rows in the GUI's Controls tab, and lists them under `gfcc devices`. |
 
 ---
 
@@ -51,7 +52,6 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 |---|---|---|---|
 | **Doctor / health check** — validate repo, watcher, file access, decoder, config, deps in one command, before you need a restore. | High | Easy–Med | Touches modules that already exist; mostly orchestration. |
 | **Config linter / sanity checker** — warn on out-of-bounds INI values (e.g. `maxWorkingSetMB_64` > physical RAM, stale VR keys) that cause stutter/crashes. | High | Medium | Needs a small rules table + system info (RAM). |
-| **Duplicate / conflicting binding detection** — flag inputs bound to multiple actions or accidental double-binds. | High | Easy–Med | Analyze decoded `controls.cfg` entries. |
 | **Binding inventory** — human-readable list of every keyboard/wheel/pedal/button assignment. | Med | Easy | Codec already decodes; just format it. |
 | **Known-good restore points** — a dedicated "verified in use" designation separate from tags, with a one-click "revert to last known-good". | High | Easy | Special tag namespace + restore shortcut. |
 | **Orphaned-file cleanup** — detect files in `Documents\iRacing` no longer used by the current build / uninstalled content. | Low–Med | Medium | Hard to know "unused" reliably. |

@@ -512,6 +512,7 @@ async function renderControls() {
       ${icon("alert", "ico")}
       <p class="muted mt-0" style="font-size:12.5px">${esc(c.ffbNote)}</p>
     </div>
+    ${conflictBanner(c.conflicts)}
     <input class="search" id="ctlSearch" placeholder="Search controls (e.g. throttle, pit, shift)…" value="${esc(state.controlsFilter)}">
     <div class="card" style="padding:14px">
       <div class="spread" style="margin-bottom:10px">
@@ -528,9 +529,24 @@ async function renderControls() {
   renderDevicesAside();
 }
 
+function conflictBanner(conflicts) {
+  if (!conflicts || !conflicts.length) return "";
+  const rows = conflicts.map((x) =>
+    `<div style="margin:5px 0;font-size:12.5px"><span class="bind ${x.kind}">${esc(x.label)}</span>
+      <span class="muted">→</span> ${x.actions.map((a) => esc(prettyAction(a))).join(", ")}</div>`).join("");
+  return `<div class="card conflict-banner" style="margin-bottom:16px">
+    <p class="section-label" style="color:var(--warn);margin-bottom:8px">${icon("alert")} ${conflicts.length} binding conflict${conflicts.length > 1 ? "s" : ""} — one input is assigned to multiple actions</p>
+    ${rows}</div>`;
+}
+
+function conflictActionSet() {
+  return new Set(((state.controls && state.controls.conflicts) || []).flatMap((x) => x.actions));
+}
+
 function renderCtlRows() {
   const c = state.controls;
   const q = state.controlsFilter.toLowerCase();
+  const conflicting = conflictActionSet();
   let rows = c.bindings.slice();
   if (!state.showUnbound) rows = rows.filter((b) => b.kind !== "unbound");
   if (q) rows = rows.filter((b) => prettyAction(b.action).toLowerCase().includes(q) || b.action.toLowerCase().includes(q) || (b.display || "").toLowerCase().includes(q));
@@ -538,10 +554,12 @@ function renderCtlRows() {
   rows.sort((a, b) => (a.kind === "unbound") - (b.kind === "unbound"));
   const body = $("#ctlBody");
   if (!rows.length) { body.innerHTML = `<tr><td colspan="3" class="muted" style="padding:18px">No controls match your search.</td></tr>`; return; }
-  body.innerHTML = rows.map((b) => `
-    <tr><td class="ctl-action">${esc(prettyAction(b.action))}</td>
+  body.innerHTML = rows.map((b) => {
+    const bad = conflicting.has(b.action);
+    return `<tr class="${bad ? "conflict" : ""}"><td class="ctl-action">${esc(prettyAction(b.action))}${bad ? `<span class="conflict-badge">conflict</span>` : ""}</td>
       <td><span class="bind ${b.kind}">${esc(b.display)}</span></td>
-      <td class="ctl-device">${esc(b.device || "—")}</td></tr>`).join("");
+      <td class="ctl-device">${esc(b.device || "—")}</td></tr>`;
+  }).join("");
 }
 
 function presencePill(p) {

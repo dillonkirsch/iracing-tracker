@@ -501,6 +501,17 @@ def cmd_devices(args) -> int:
         print("\ndevices in joyCalib.yaml:")
         for d in report.calibrated:
             print(f"  {d.name}  instance {d.instance_guid}  ({presence(d)})")
+
+    if base_doc:
+        from irtracker.gfcc.analyze import find_binding_conflicts
+
+        conflicts = find_binding_conflicts(base_doc)
+        if conflicts:
+            print("\nbinding conflicts (one input bound to multiple actions):")
+            for c in conflicts:
+                print(f"  {c.label}: {', '.join(c.actions)}")
+        else:
+            print("\nno duplicate button/key bindings detected")
     return 0
 
 
