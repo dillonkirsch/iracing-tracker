@@ -1,16 +1,22 @@
 name: Build & Release
 
-# Builds the standalone Windows .exe and publishes a GitHub Release whenever you
-# push a version tag (v1.0.0, v1.2.3, ...). You can also run it by hand from the
-# Actions tab (workflow_dispatch) to test the build without cutting a release.
+# Every push to master builds the Windows .exe and publishes a GitHub Release
+# with an auto-incremented version number (major.minor taken from
+# pyproject.toml, plus a patch that climbs with each commit) and a short
+# bullet-point changelog generated from the commits since the last release.
+# Pushing a version tag (e.g. v1.2.3) publishes a release under that exact name
+# instead. Manual runs (workflow_dispatch) build the .exe as a downloadable
+# artifact without publishing a release.
 on:
   push:
+    branches:
+      - master
     tags:
       - "v*"
   workflow_dispatch:
 
 permissions:
-  contents: write        # needed to create the release and upload the .exe
+  contents: write        # needed to create tags/releases and upload the .exe
 
 jobs:
   build:
@@ -18,11 +24,27 @@ jobs:
     steps:
       - name: Check out the code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # full history + tags so we can build the changelog
+          fetch-tags: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Work out the version number
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            v="${{ github.ref_name }}"                       # use the pushed tag as-is
+          else
+            base=$(python -c "import re;m=re.search(r'^version\s*=\s*\"(\d+)\.(\d+)',open('pyproject.toml').read(),re.M);print(m.group(1)+'.'+m.group(2))")
+            v="v${base}.$(git rev-list --count HEAD)"        # major.minor + commit count
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Building $v"
 
       - name: Install the app and build tools
         run: |
@@ -50,6 +72,26 @@ jobs:
           (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower() + "  iRacingConfigTracker.exe" `
             | Out-File -Encoding ascii "dist/iRacingConfigTracker.exe.sha256"
 
+      - name: Write release notes
+        id: notes
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          prev=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+          if [ -n "$prev" ]; then range="$prev..HEAD"; else range="HEAD"; fi
+          {
+            echo "notes<<NOTES_EOF"
+            echo "### What's new in $VERSION"
+            echo ""
+            git log "$range" --no-merges --pretty=format:'- %s' | head -15
+            echo ""
+            echo ""
+            echo "_Automated build from commit \`${GITHUB_SHA::7}\`. Download \`iRacingConfigTracker.exe\` below._"
+            echo "NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Upload build artifact (always)
         uses: actions/upload-artifact@v4
         with:
@@ -59,12 +101,13 @@ jobs:
             dist/iRacingConfigTracker.exe.sha256
           if-no-files-found: error
 
-      - name: Publish GitHub Release (tags only)
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Publish GitHub Release
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.ref_name }}
-          generate_release_notes: true
+          tag_name: ${{ steps.ver.outputs.version }}
+          name: ${{ steps.ver.outputs.version }}
+          body: ${{ steps.notes.outputs.notes }}
           fail_on_unmatched_files: true
           files: |
             dist/iRacingConfigTracker.exe
