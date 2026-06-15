@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -115,12 +114,16 @@ def apply_update(exe_url: str, sha_url: str | None = None) -> dict:
         return {"ok": False, "error": "Self-update only works in the packaged app. "
                 "From source, use git to update."}
     current = Path(sys.executable)
-    tmp = Path(tempfile.mkdtemp(prefix="ict-update-"))
-    new_exe = tmp / EXE_NAME
+    # Stable staging dir so the log is easy to find if something goes wrong.
+    stage = Path(tempfile.gettempdir()) / "iracing-config-tracker-update"
+    shutil.rmtree(stage, ignore_errors=True)
+    stage.mkdir(parents=True, exist_ok=True)
+    new_exe = stage / EXE_NAME
+    log = stage / "update-log.txt"
     try:
         _download(exe_url, new_exe)
         if sha_url:
-            sha_file = tmp / "sha256.txt"
+            sha_file = stage / "sha256.txt"
             _download(sha_url, sha_file)
             want = sha_file.read_text(encoding="utf-8", errors="replace").split()[0].lower()
             got = hashlib.sha256(new_exe.read_bytes()).hexdigest().lower()
@@ -130,24 +133,38 @@ def apply_update(exe_url: str, sha_url: str | None = None) -> dict:
     except Exception as exc:
         return {"ok": False, "error": f"Download failed: {exc}"}
 
-    pid = os.getpid()
     protected = not _dir_writable(current.parent)
-    # In a protected folder the helper runs elevated, so relaunch via explorer
-    # to drop back to normal privileges (don't keep running the app as admin).
+    # In a protected folder the helper runs elevated, so relaunch via explorer to
+    # drop back to normal privileges (don't keep running the app as admin).
     relaunch = f'explorer.exe "{current}"' if protected else f'start "" "{current}"'
-    bat = tmp / "apply_update.bat"
-    bat.write_text(
-        "@echo off\r\n"
-        ":wait\r\n"
-        f'tasklist /FI "PID eq {pid}" 2>NUL | find "{pid}" >NUL\r\n'
-        "if not errorlevel 1 (\r\n"
-        "  ping -n 2 127.0.0.1 >NUL\r\n"
-        "  goto wait\r\n"
-        ")\r\n"
-        f'move /Y "{new_exe}" "{current}" >NUL\r\n'
-        f"{relaunch}\r\n"
-        'del "%~f0"\r\n',
-        encoding="utf-8")
+    # A running .exe stays locked, so move/Y fails until the app exits. Just
+    # retry the swap until it succeeds — that naturally waits for the unlock.
+    # (Avoid tasklist/find to detect exit: those console tools hang when the
+    # helper runs with no console window.)
+    bat = stage / "apply_update.bat"
+    bat.write_text("\r\n".join([
+        "@echo off",
+        f'set "LOG={log}"',
+        'echo [update] waiting for the app to close, then replacing it > "%LOG%"',
+        "set /a tries=0",
+        ":retry",
+        f'move /Y "{new_exe}" "{current}" >> "%LOG%" 2>&1',
+        f'if not exist "{new_exe}" goto done',
+        "set /a tries+=1",
+        "if %tries% geq 90 goto giveup",
+        "ping -n 2 127.0.0.1 >NUL",
+        "goto retry",
+        ":done",
+        'echo [update] replaced; relaunching >> "%LOG%"',
+        relaunch,
+        'del "%~f0"',
+        "exit",
+        ":giveup",
+        'echo [update] ERROR: the app file is still in use; could not replace it >> "%LOG%"',
+        relaunch,
+        "exit",
+        "",
+    ]), encoding="utf-8")
 
     if protected:
         # ShellExecute "runas" pops UAC and returns once the user responds:
@@ -164,7 +181,8 @@ def apply_update(exe_url: str, sha_url: str | None = None) -> dict:
                              "is in a protected folder, and that was declined."}
         return {"ok": True, "restarting": True, "elevated": True}
 
-    flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
-             | getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    # CREATE_NO_WINDOW (alone) gives a hidden console and survives our exit;
+    # do NOT combine with DETACHED_PROCESS (that pair is contradictory).
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     subprocess.Popen(["cmd", "/c", str(bat)], creationflags=flags, close_fds=True)
     return {"ok": True, "restarting": True}
