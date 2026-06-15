@@ -443,6 +443,35 @@ def cmd_remap(args) -> int:
     return 0
 
 
+def cmd_whatis(args) -> int:
+    """Reverse lookup: what is a given key/button/axis bound to?"""
+    cfg = None
+    base_path = Path(args.base) if args.base else None
+    if base_path is None:
+        cfg = _load(args)
+        base_path = cfg.iracing_dir / "controls.cfg"
+    try:
+        data = base_path.read_bytes()
+    except OSError as exc:
+        return _fail(str(exc))
+    try:
+        doc = codec.decode_bytes(data)
+    except GfccError as exc:
+        return _fail(f"cannot decode {base_path}: {exc}")
+    from irtracker.gfcc.analyze import find_input
+    try:
+        label, _kind, matches = find_input(doc, args.input)
+    except GfccError as exc:
+        return _fail(str(exc))
+    if not matches:
+        print(f"{label}: not bound (free)")
+        return 0
+    print(f"{label} is bound to:")
+    for m in matches:
+        print(f"  {m['action']}  ({m['device']})")
+    return 0
+
+
 def cmd_devices(args) -> int:
     from irtracker.gfcc.devices import build_report
 
@@ -689,6 +718,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="back up and install into the live folder (refused while the sim runs)")
     p.set_defaults(func=cmd_remap)
 
+    p = sub.add_parser("whatis", help='reverse lookup: what is an input bound to (e.g. "Alt+P", "Btn 5")')
+    _add_common(p)
+    p.add_argument("input", help='the key/button/axis to identify, e.g. "Alt+P", "Btn 5", "Axis 3"')
+    p.add_argument("--base", help="controls.cfg to inspect (default: live file)")
+    p.set_defaults(func=cmd_whatis)
+
     p = sub.add_parser("devices", help="list connected controllers and referenced devices")
     _add_common(p)
     p.add_argument("--base", help="controls.cfg to inspect (default: live file)")
@@ -725,9 +760,9 @@ def main(argv: list[str] | None = None) -> int:
 def gfcc_main(argv: list[str] | None = None) -> int:
     """`gfcc` alias: codec commands only (requirements section 7)."""
     argv = list(sys.argv[1:] if argv is None else argv)
-    allowed = {"decode", "encode", "devices", "remap"}
+    allowed = {"decode", "encode", "devices", "remap", "whatis"}
     if not argv or argv[0] in ("-h", "--help"):
-        print("usage: gfcc {decode,encode,devices,remap} ...\n"
+        print("usage: gfcc {decode,encode,devices,remap,whatis} ...\n"
               "       gfcc decode controls.cfg -o controls.json\n"
               "       gfcc encode --base controls.cfg --bindings my_binds.json -o controls.new.cfg\n"
               "       gfcc encode --base controls.cfg --bindings my_binds.json --install\n"

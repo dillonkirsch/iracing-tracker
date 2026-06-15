@@ -1,8 +1,11 @@
-"""Duplicate / conflicting binding detection."""
+"""Duplicate / conflicting binding detection + reverse input lookup."""
 import json
 
+import pytest
+
 from irtracker.gfcc import codec
-from irtracker.gfcc.analyze import find_binding_conflicts
+from irtracker.gfcc.analyze import find_binding_conflicts, find_input
+from irtracker.gfcc.codec import GfccError
 from irtracker.gfcc.patch import apply_bindings, load_bindings
 
 _INST_A = "D94DE5E0-6276-11F1-8001-444553540000"
@@ -66,3 +69,37 @@ def test_same_button_on_different_devices_is_not_a_conflict():
         {"name": "B", "type": "button", "value": 16, "slot1": _INST_B, "slot2": _PRODUCT},
     ]}}
     assert find_binding_conflicts(doc) == []
+
+
+# -- reverse input lookup ------------------------------------------------------
+
+def test_find_input_axis(corpus_cfg_bytes):
+    doc = codec.decode_bytes(corpus_cfg_bytes)
+    label, kind, matches = find_input(doc, "Axis 0")
+    assert (label, kind) == ("Axis 0", "axis")
+    assert {"SteerLeft", "SteerRight"} <= {m["action"] for m in matches}
+
+
+def test_find_input_button(corpus_cfg_bytes):
+    doc = codec.decode_bytes(corpus_cfg_bytes)
+    label, kind, matches = find_input(doc, "Btn 5")   # ShiftDown = value 32 = bit 5
+    assert (label, kind) == ("Btn 5", "button")
+    assert any(m["action"] == "ShiftDown" for m in matches)
+
+
+def test_find_input_key(corpus_cfg_bytes):
+    doc = codec.decode_bytes(corpus_cfg_bytes)
+    _label, kind, matches = find_input(doc, "a")
+    assert kind == "key"
+    assert any(m["action"] == "PitSpeedLimiter" for m in matches)
+
+
+def test_find_input_free_input(corpus_cfg_bytes):
+    doc = codec.decode_bytes(corpus_cfg_bytes)
+    assert find_input(doc, "Btn 30")[2] == []
+
+
+def test_find_input_unknown_key_raises(corpus_cfg_bytes):
+    doc = codec.decode_bytes(corpus_cfg_bytes)
+    with pytest.raises(GfccError):
+        find_input(doc, "asdfqwer")

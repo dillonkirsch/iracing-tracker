@@ -284,6 +284,15 @@ body {
 }
 .ctl-table tr.conflict td { background: rgba(251,191,36,.07); }
 
+.keycap {
+  padding: 9px 14px; border: 1px dashed var(--line); border-radius: var(--radius-sm);
+  color: var(--text-dim); cursor: text; user-select: none; font-size: 13px;
+}
+.keycap:focus {
+  outline: none; border-style: solid; border-color: var(--accent);
+  background: var(--accent-soft); color: var(--text);
+}
+
 .search {
   width: 100%; padding: 9px 12px; border-radius: var(--radius-sm);
   background: var(--bg); border: 1px solid var(--line); color: var(--text);

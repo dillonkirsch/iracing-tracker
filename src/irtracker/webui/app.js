@@ -566,6 +566,16 @@ async function renderControls() {
       <p class="muted mt-0" style="font-size:12.5px">${esc(c.ffbNote)}</p>
     </div>
     ${conflictBanner(c.conflicts)}
+    <div class="card" style="margin-bottom:16px">
+      <p class="section-label mt-0">Identify a control — what does this do?</p>
+      <div class="row-gap">
+        <div id="keycap" class="keycap" tabindex="0">Click here, then press a key…</div>
+        <span class="muted" style="font-size:12.5px">or type</span>
+        <input class="search" id="identifyInput" style="margin-bottom:0;max-width:180px" placeholder="Btn 5, Axis 3, Alt+P">
+        <button class="btn btn-sm" data-action="identify">Identify</button>
+      </div>
+      <div id="identifyResult"></div>
+    </div>
     <input class="search" id="ctlSearch" placeholder="Search controls (e.g. throttle, pit, shift)…" value="${esc(state.controlsFilter)}">
     <div class="card" style="padding:14px">
       <div class="spread" style="margin-bottom:10px">
@@ -578,8 +588,59 @@ async function renderControls() {
 
   $("#ctlSearch").addEventListener("input", (e) => { state.controlsFilter = e.target.value; renderCtlRows(); });
   $("#showUnbound").addEventListener("change", (e) => { state.showUnbound = e.target.checked; renderCtlRows(); });
+  const cap = $("#keycap");
+  cap.addEventListener("keydown", (ev) => { ev.preventDefault(); const q = eventToQuery(ev); if (q) doIdentify(q); });
+  cap.addEventListener("focus", () => { cap.textContent = "Press any key…"; });
+  cap.addEventListener("blur", () => { cap.textContent = "Click here, then press a key…"; });
+  $("#identifyInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doIdentify(e.target.value); } });
   renderCtlRows();
   renderDevicesAside();
+}
+
+function jsKeyName(ev) {
+  if (ev.key === "CapsLock") return "capslock";
+  if (["Control", "Shift", "Alt", "Meta", "OS"].includes(ev.key)) return null;  // modifier alone
+  const code = ev.code || "";
+  if (code.startsWith("Numpad")) {
+    const np = { NumpadAdd: "numpad+", NumpadSubtract: "numpad-", NumpadMultiply: "numpad*",
+                 NumpadDivide: "numpad/", NumpadDecimal: "numpad." };
+    if (np[code]) return np[code];
+    const d = code.slice(6);
+    if (/^\d$/.test(d)) return "numpad" + d;
+  }
+  const named = {
+    " ": "space", Enter: "enter", Escape: "esc", Tab: "tab", Backspace: "backspace",
+    Delete: "delete", Insert: "insert", Home: "home", End: "end", PageUp: "pageup",
+    PageDown: "pagedown", ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up",
+    ArrowDown: "down", NumLock: "numlock", Pause: "pause", PrintScreen: "printscreen",
+  };
+  if (named[ev.key]) return named[ev.key];
+  if (/^F\d{1,2}$/.test(ev.key)) return ev.key.toLowerCase();
+  return ev.key.toLowerCase();   // letters, digits, punctuation; backend rejects unknowns
+}
+
+function eventToQuery(ev) {
+  const key = jsKeyName(ev);
+  if (!key) return null;
+  const mods = [];
+  if (ev.ctrlKey) mods.push("ctrl");
+  if (ev.shiftKey) mods.push("shift");
+  if (ev.altKey) mods.push("alt");
+  return [...mods, key].join("+");
+}
+
+async function doIdentify(query) {
+  const out = $("#identifyResult");
+  if (!out || !query || !String(query).trim()) return;
+  const r = await api("identify_input", String(query).trim());
+  if (!r.ok) { out.innerHTML = `<p class="muted" style="margin-top:10px">${esc(r.error)}</p>`; return; }
+  if (r.free) {
+    out.innerHTML = `<div style="margin-top:12px"><span class="bind ${r.kind}">${esc(r.label)}</span>
+      <span class="pill good" style="margin-left:8px"><span class="dot"></span>Free — not bound to anything</span></div>`;
+    return;
+  }
+  out.innerHTML = `<div style="margin-top:12px"><span class="bind ${r.kind}">${esc(r.label)}</span> <span class="muted">is bound to:</span>
+    ${r.matches.map((m) => `<div class="file-row" style="padding:8px 0"><div class="file-name">${esc(prettyAction(m.action))}</div><div class="file-meta ctl-device">${esc(m.device)}</div></div>`).join("")}</div>`;
 }
 
 function conflictBanner(conflicts) {
@@ -984,6 +1045,7 @@ document.addEventListener("click", (e) => {
   if (a === "browse-iracing") return doBrowse("setIracing");
   if (a === "browse-data") return doBrowse("setData");
   if (a === "save-settings") return doSaveSettings();
+  if (a === "identify") return doIdentify(($("#identifyInput") || {}).value);
   if (a === "check-update") return doCheckUpdate();
   if (a === "do-update") return doUpdate();
   if (a === "open-release") return api("open_url", (state.update || {}).url);

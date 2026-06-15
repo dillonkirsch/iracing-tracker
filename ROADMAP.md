@@ -22,6 +22,7 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 | **Compare any two backups + PDF export** | Pick any two backups (or "Now (live)") in History → one aggregated, colour-coded diff with the summary at the top; **Export PDF** produces a clean report (logo, summary first, per-file detail). |
 | **Editable folders** | Change the iRacing folder and where backups are stored from Settings (with a native folder picker), optionally moving existing backups; saved back to `config.toml`. |
 | **Auto-update** | The packaged app checks GitHub Releases on startup and from Settings; one click downloads the new `.exe`, checksum-verifies it, swaps it in place, and relaunches. Shows a banner on Home when a newer build is available. |
+| **Reverse input lookup ("what does this do?")** | In Controls & Devices, press a key in the capture box (or type "Btn 5" / "Axis 3" / "Alt+P") to see which action(s) it's bound to — or "free". Also `gfcc whatis "<input>"` on the CLI. |
 
 ---
 
@@ -47,7 +48,6 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 | **Automatic iRacing build-upgrade detection** — record the active build per snapshot; auto-annotate + summarise what the seasonal update changed. | High | Med–Hard | Need a reliable source for the build version (file/registry — TBD). Great for "did I break it or did iRacing?". |
 | **Session outcome linking** — poll incidents / best lap at sim exit and store with the snapshot ("FFB I used for my Spa PB"). | Med | Medium | Already poll pyirsdk for car/track (FR-6); extend to results. |
 | **Configuration timeline** — high-level chronological view (snapshots, tags, restores, build upgrades) instead of raw commits. | Med | Easy–Med | View over the existing log; fits the GUI history tab. |
-| **Reverse input lookup ("what does this do?")** — press/enter a key or button and instantly see which action(s) it's bound to. | Med–High | Easy–Med | The decoder already maps actions→inputs; this is the inverse, reusing the bindings + conflict logic. Handy for "I pressed something — what was that?" and for finding a free key. |
 
 ---
 

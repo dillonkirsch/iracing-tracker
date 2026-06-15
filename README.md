@@ -130,6 +130,7 @@ gfcc encode --base controls.cfg --bindings my_binds.json --install   # backup + 
 gfcc devices                        # connected controllers vs what the file references
 gfcc remap --auto --install         # fix bindings after a USB-port change / new PC
 gfcc remap --from OLD_GUID --to NEW_GUID -o controls.new.cfg
+gfcc whatis "Alt+P"                 # reverse lookup: what action is this bound to?
 ```
 
 `remap` repoints every binding (and the matching `joyCalib.yaml` calibration)

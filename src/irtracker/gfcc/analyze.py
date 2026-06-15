@@ -8,11 +8,12 @@ where a shared input genuinely fires two actions at once.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from irtracker.gfcc.codec import guid_from_str
-from irtracker.gfcc.keymap import VK_NAMES, mods_note
+from irtracker.gfcc.codec import GfccError, guid_from_str
+from irtracker.gfcc.keymap import VK_NAMES, mods_mask, mods_note, vk_for_name
 
 _EXTRA_SLOT = "00000001-0000-0000-0000-000000000000"
 
@@ -130,3 +131,62 @@ def find_binding_conflicts(doc: dict[str, Any]) -> list[Conflict]:
 
     conflicts.sort(key=lambda c: (c.kind, c.label))
     return conflicts
+
+
+# -- reverse input lookup ("what is this bound to?") ----------------------------
+
+def _device_label(entry: dict[str, Any], devices: dict[str, str]) -> str:
+    if entry.get("type") == "key":
+        return "Keyboard"
+    for i in range(3):
+        g = entry.get(f"slot{i}")
+        if g and g in devices:
+            note = devices[g]
+            return note.split(" - ", 1)[1] if " - " in note else "Game controller"
+    return "Game controller"
+
+
+def find_input(doc: dict[str, Any], query: str) -> tuple[str, str, list[dict]]:
+    """Reverse lookup: which action(s) is a given input bound to?
+
+    Accepts a button ("Btn 5"), axis ("Axis 3"), or key combo ("Alt+P", "F6").
+    Returns (friendly_label, kind, matches) where matches is a list of
+    {"action", "device"} (empty if the input is free). Raises GfccError if the
+    input can't be understood.
+    """
+    devices = doc.get("_devices", {})
+    entries = doc["controls"]["entries"]
+    q = (query or "").strip()
+    if not q:
+        raise GfccError('type a key (e.g. "Alt+P"), a button ("Btn 5"), or an axis ("Axis 3")')
+
+    def out(es):
+        return [{"action": e["name"], "device": _device_label(e, devices)} for e in es]
+
+    m = re.fullmatch(r"(?:btn|button|b)\s*(\d+)", q, re.I)
+    if m:
+        bit = int(m.group(1))
+        mask = 1 << bit
+        hits = [e for e in entries if e.get("type") == "button" and (e.get("value", 0) & mask)]
+        return f"Btn {bit}", "button", out(hits)
+
+    m = re.fullmatch(r"axis\s*(\d+)", q, re.I)
+    if m:
+        idx = int(m.group(1))
+        hits = [e for e in entries if e.get("type") == "axis" and e.get("value", 0) == idx]
+        return f"Axis {idx}", "axis", out(hits)
+
+    parts = [p for p in re.split(r"[+\s]+", q) if p]
+    *mod_names, key_name = parts
+    try:
+        mask = mods_mask(mod_names)
+    except ValueError as exc:
+        raise GfccError(str(exc)) from exc
+    vk = vk_for_name(key_name)
+    if vk is None:
+        raise GfccError(f"don't recognize the key {key_name!r}")
+    note = mods_note(mask)
+    label = (note + "+" if note else "") + VK_NAMES.get(vk, key_name)
+    hits = [e for e in entries if e.get("type") == "key"
+            and e.get("value", 0) == vk and _norm_mods(e.get("modifiers", 0)) == mask]
+    return label, "key", out(hits)

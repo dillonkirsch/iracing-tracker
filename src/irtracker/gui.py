@@ -614,6 +614,22 @@ class GuiApi:
             })
         return out
 
+    def identify_input(self, query: str) -> dict:
+        """Reverse lookup: what action(s) a key/button/axis is bound to."""
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        controls = cfg.iracing_dir / "controls.cfg"
+        if not controls.exists():
+            return _err("No controls.cfg found in your iRacing folder.")
+        try:
+            doc = codec.decode_bytes(controls.read_bytes())
+            from irtracker.gfcc.analyze import find_input
+            label, kind, matches = find_input(doc, query)
+        except (OSError, GfccError) as exc:
+            return _err(str(exc))
+        return _ok(query=query, label=label, kind=kind, matches=matches, free=not matches)
+
     def get_devices(self) -> dict:
         cfg = self._config()
         if cfg is None:
