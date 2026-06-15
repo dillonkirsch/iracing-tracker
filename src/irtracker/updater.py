@@ -28,6 +28,22 @@ def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+def _dir_writable(path: Path) -> bool:
+    try:
+        probe = path / ".ict-write-test.tmp"
+        probe.write_bytes(b"")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def needs_admin() -> bool:
+    """True when the running .exe lives somewhere we can't overwrite without
+    elevation (e.g. Program Files)."""
+    return is_frozen() and not _dir_writable(Path(sys.executable).parent)
+
+
 def current_version() -> str:
     """Version of this build (set at package time), or a best-effort fallback."""
     try:
@@ -78,6 +94,7 @@ def check_for_update(timeout: float = 8.0) -> dict:
         "latest": tag,
         "updateAvailable": is_newer(tag, cur),
         "canApply": is_frozen() and bool(exe_url),
+        "needsAdmin": needs_admin(),
         "url": data.get("html_url"),
         "notes": (data.get("body") or "")[:1200],
         "exeUrl": exe_url,
@@ -114,6 +131,10 @@ def apply_update(exe_url: str, sha_url: str | None = None) -> dict:
         return {"ok": False, "error": f"Download failed: {exc}"}
 
     pid = os.getpid()
+    protected = not _dir_writable(current.parent)
+    # In a protected folder the helper runs elevated, so relaunch via explorer
+    # to drop back to normal privileges (don't keep running the app as admin).
+    relaunch = f'explorer.exe "{current}"' if protected else f'start "" "{current}"'
     bat = tmp / "apply_update.bat"
     bat.write_text(
         "@echo off\r\n"
@@ -124,9 +145,24 @@ def apply_update(exe_url: str, sha_url: str | None = None) -> dict:
         "  goto wait\r\n"
         ")\r\n"
         f'move /Y "{new_exe}" "{current}" >NUL\r\n'
-        f'start "" "{current}"\r\n'
+        f"{relaunch}\r\n"
         'del "%~f0"\r\n',
         encoding="utf-8")
+
+    if protected:
+        # ShellExecute "runas" pops UAC and returns once the user responds:
+        # >32 = accepted/launched, <=32 = declined or failed.
+        try:
+            import ctypes
+            rc = int(ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", "cmd.exe", f'/c "{bat}"', None, 0))
+        except Exception as exc:
+            return {"ok": False, "error": f"Couldn't request administrator permission: {exc}"}
+        if rc <= 32:
+            return {"ok": False, "needsAdmin": True,
+                    "error": "This update needs administrator permission because the app "
+                             "is in a protected folder, and that was declined."}
+        return {"ok": True, "restarting": True, "elevated": True}
 
     flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
              | getattr(subprocess, "CREATE_NO_WINDOW", 0))

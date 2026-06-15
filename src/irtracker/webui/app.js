@@ -927,9 +927,18 @@ async function onToggleWatch(e) {
 }
 
 async function onToggleAutostart(e) {
-  const r = await api("set_autostart", e.target.checked);
+  const on = e.target.checked;
+  const ok = await confirmModal({
+    title: on ? "Start automatically when you log in?" : "Stop starting automatically?",
+    body: on
+      ? "iRacing Config Tracker will start with Windows and quietly back up your settings in the background."
+      : "It won't start on its own anymore — you'll open it yourself when you want it.",
+    confirmLabel: on ? "Yes, enable" : "Disable",
+  });
+  if (!ok) { e.target.checked = !on; return; }   // revert the toggle
+  const r = await api("set_autostart", on);
   toast(r.ok ? r.message : r.error, r.ok ? "good" : "bad");
-  if (!r.ok) e.target.checked = !e.target.checked;
+  if (!r.ok) e.target.checked = !on;
   await loadOverview();
 }
 
@@ -1065,7 +1074,8 @@ async function doUpdate() {
   if (!u.canApply) { if (u.url) api("open_url", u.url); return; }
   const ok = await confirmModal({
     title: `Install ${esc(u.latest)}?`,
-    body: "This downloads the new version, replaces the current app, and reopens it automatically. Takes a few seconds.",
+    body: "This downloads the new version, replaces the current app, and reopens it automatically. Takes a few seconds."
+      + (u.needsAdmin ? "<br><br><b>Windows will ask for administrator permission</b> because the app is in a protected folder." : ""),
     confirmLabel: "Update now",
   });
   if (!ok) return;

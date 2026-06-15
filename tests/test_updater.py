@@ -15,3 +15,12 @@ def test_is_newer():
 def test_current_version_is_a_string():
     v = updater.current_version()
     assert isinstance(v, str) and v
+
+
+def test_dir_writable(tmp_path):
+    assert updater._dir_writable(tmp_path) is True
+
+
+def test_needs_admin_false_from_source():
+    # running tests is never "frozen", so elevation is never required
+    assert updater.needs_admin() is False
