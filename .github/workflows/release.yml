@@ -44,6 +44,7 @@ jobs:
             v="v${base}.$(git rev-list --count HEAD)"        # major.minor + commit count
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
+          printf 'VERSION = "%s"\n' "$v" > src/irtracker/_buildinfo.py
           echo "Building $v"
 
       - name: Install the app and build tools

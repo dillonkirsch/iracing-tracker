@@ -14,6 +14,9 @@ $py = if (Test-Path ".venv\Scripts\python.exe") { ".venv\Scripts\python.exe" } e
 & $py -m pip install -e ".[gui,sim,toast]"
 & $py -m pip install pyinstaller
 
+# Stamp a dev version so the built exe knows what it is (CI overwrites this).
+Set-Content -Path "src/irtracker/_buildinfo.py" -Value 'VERSION = "v0.0.0-dev"' -Encoding utf8
+
 & $py -m PyInstaller --noconfirm --clean `
   --onefile --windowed `
   --name iRacingConfigTracker `

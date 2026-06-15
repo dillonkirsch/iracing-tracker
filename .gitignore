@@ -8,6 +8,9 @@ build/
 dist/
 *.spec
 
+# Written by the build to embed the release version (see updater.py)
+src/irtracker/_buildinfo.py
+
 # Editors / local tooling
 .idea/
 .vscode/

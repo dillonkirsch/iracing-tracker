@@ -781,6 +781,20 @@ class GuiApi:
                    checks=[{"name": c.name, "status": c.status, "detail": c.detail}
                            for c in checks])
 
+    def check_for_update(self) -> dict:
+        from irtracker import updater
+        return updater.check_for_update()
+
+    def apply_update(self, exe_url: str, sha_url: str | None = None) -> dict:
+        from irtracker import updater
+        result = updater.apply_update(exe_url, sha_url)
+        if result.get("ok"):
+            # Let this JS call return, then exit so the swap helper can replace
+            # the running .exe and relaunch it.
+            threading.Timer(1.2, lambda: os._exit(0)).start()
+            result["message"] = "Update downloaded — the app will close and reopen in a moment…"
+        return result
+
     def pick_folder(self) -> dict:
         """Open a native folder picker (pywebview only)."""
         if self._window is None:
@@ -859,6 +873,15 @@ class GuiApi:
             return _err(f"{path} doesn't exist yet.")
         try:
             os.startfile(str(path))  # noqa: S606 - Windows Explorer, user-initiated
+        except Exception as exc:
+            return _err(str(exc))
+        return _ok()
+
+    def open_url(self, url: str) -> dict:
+        if not url or not str(url).startswith(("http://", "https://")):
+            return _err("invalid URL")
+        try:
+            webbrowser.open(url)
         except Exception as exc:
             return _err(str(exc))
         return _ok()

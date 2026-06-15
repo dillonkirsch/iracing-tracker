@@ -21,6 +21,7 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 | **App icon** | Custom app/exe/window/taskbar icon + favicon + loading-screen logo (replaces the default Python icon). |
 | **Compare any two backups + PDF export** | Pick any two backups (or "Now (live)") in History → one aggregated, colour-coded diff with the summary at the top; **Export PDF** produces a clean report (logo, summary first, per-file detail). |
 | **Editable folders** | Change the iRacing folder and where backups are stored from Settings (with a native folder picker), optionally moving existing backups; saved back to `config.toml`. |
+| **Auto-update** | The packaged app checks GitHub Releases on startup and from Settings; one click downloads the new `.exe`, checksum-verifies it, swaps it in place, and relaunches. Shows a banner on Home when a newer build is available. |
 
 ---
 
@@ -77,7 +78,6 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 
 | Feature | Value | Effort | Foundation / notes |
 |---|---|---|---|
-| **Auto-update** — check GitHub Releases and offer to download the newer `.exe`. | Med | Medium | Releases are now automated per push — perfect fit. In-place exe swap on Windows is the fiddly part. |
 | **System-tray presence** — a tray icon with "Back up now" / status so it runs quietly in the background. (App icon itself: done.) | Med | Medium | App icon already shipped. |
 | **First-run wizard** — detect the iRacing folder, offer auto-backup, make the first baseline. | Med | Easy–Med | Detection + snapshot already exist. |
 | **Code-sign the exe** — kill the SmartScreen "unknown publisher" warning. | Med | Hard* | *Technically easy; needs a paid signing cert + process. |

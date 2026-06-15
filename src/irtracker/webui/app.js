@@ -296,6 +296,7 @@ function renderHome() {
   }
 
   content.innerHTML = `
+    ${updateBanner()}
     <div class="page-head">
       <h1 class="page-title">Home</h1>
       <p class="page-sub">A safety net for your iRacing configuration.</p>
@@ -754,6 +755,8 @@ function renderSettings() {
       <div id="healthResults"></div>
     </div>
 
+    ${updatesCard()}
+
     <p class="section-label" style="margin-top:22px">Automatic backups</p>
     <div class="card">
       <div class="toggle-row">
@@ -972,6 +975,9 @@ document.addEventListener("click", (e) => {
   if (a === "browse-iracing") return doBrowse("setIracing");
   if (a === "browse-data") return doBrowse("setData");
   if (a === "save-settings") return doSaveSettings();
+  if (a === "check-update") return doCheckUpdate();
+  if (a === "do-update") return doUpdate();
+  if (a === "open-release") return api("open_url", (state.update || {}).url);
 });
 
 document.querySelectorAll(".nav-item").forEach((b) =>
@@ -993,6 +999,81 @@ async function init() {
   render();
   // keep the sim chip + dashboard fresh
   setInterval(refreshOverviewQuiet, 15000);
+  checkForUpdate();          // background; surfaces a banner if there's a newer build
+}
+
+async function checkForUpdate() {
+  const u = await api("check_for_update");
+  if (!u || !u.ok) return;
+  state.update = u;
+  if (u.updateAvailable && u.canApply) {
+    if (state.view === "home") renderHome();
+    toast(`Update available: ${u.latest}`, "good");
+  }
+}
+
+function updateBanner() {
+  const u = state.update;
+  if (!u || !u.ok || !u.updateAvailable || !u.canApply) return "";
+  return `<div class="hero info" style="margin-bottom:14px">
+    <div class="hero-icon">${icon("rotate")}</div>
+    <div><h2 class="hero-title">Update available</h2>
+      <p class="hero-text">You're on ${esc(u.current)} — ${esc(u.latest)} is ready to install.</p></div>
+    <div class="hero-actions">
+      <button class="btn btn-primary" data-action="do-update">Update now</button>
+      <button class="btn" data-action="open-release">Release notes</button>
+    </div>
+  </div>`;
+}
+
+function updatesCard() {
+  const u = state.update;
+  const cur = (u && u.current) ? u.current : "—";
+  let status = "";
+  if (u && u.ok) {
+    status = u.updateAvailable
+      ? `<span class="pill warn"><span class="dot"></span>${esc(u.latest)} available</span>`
+      : `<span class="pill good"><span class="dot"></span>Up to date</span>`;
+  }
+  const install = (u && u.updateAvailable && u.canApply)
+    ? `<button class="btn btn-sm btn-primary" data-action="do-update">Install ${esc(u.latest)}</button>` : "";
+  const gh = (u && u.updateAvailable && !u.canApply)
+    ? `<button class="btn btn-sm" data-action="open-release">Get it on GitHub</button>` : "";
+  return `<p class="section-label" style="margin-top:22px">Updates</p>
+    <div class="card">
+      <div class="spread">
+        <div><div style="font-weight:600">App version ${esc(cur)}</div>
+          <div class="file-desc">Checks GitHub for the newest release.</div></div>
+        <div class="row-gap">${status}<button class="btn btn-sm" data-action="check-update">Check now</button>${install}${gh}</div>
+      </div>
+    </div>`;
+}
+
+async function doCheckUpdate() {
+  toast("Checking for updates…");
+  const u = await api("check_for_update");
+  state.update = u;
+  if (!u.ok) toast(u.error || "Couldn't check for updates.", "bad");
+  else if (u.updateAvailable) toast(`Update available: ${u.latest}`, "good");
+  else toast("You're on the latest version.", "good");
+  if (state.view === "settings" || state.view === "home") render();
+}
+
+async function doUpdate() {
+  const u = state.update;
+  if (!u || !u.exeUrl) { toast("No update info yet — try Check now.", "bad"); return; }
+  if (!u.canApply) { if (u.url) api("open_url", u.url); return; }
+  const ok = await confirmModal({
+    title: `Install ${esc(u.latest)}?`,
+    body: "This downloads the new version, replaces the current app, and reopens it automatically. Takes a few seconds.",
+    confirmLabel: "Update now",
+  });
+  if (!ok) return;
+  toast("Downloading update…");
+  const r = await api("apply_update", u.exeUrl, u.shaUrl || null);
+  if (!r.ok) { toast(r.error, "bad"); return; }
+  document.getElementById("modalRoot").innerHTML =
+    `<div class="modal-bg"><div class="modal"><h3>Updating…</h3><p>${esc(r.message || "The app will close and reopen.")}</p><div class="boot-spinner" style="margin:6px auto 0"></div></div></div>`;
 }
 
 (function boot() {
