@@ -20,12 +20,15 @@ RUN_VALUE = "iRacingConfigTrackerWatcher"
 
 
 def _watcher_command() -> str:
+    if getattr(sys, "frozen", False):
+        # the packaged .exe routes CLI args to the CLI (see launcher.py)
+        return f'"{sys.executable}" watcher run --quiet'
+    import os
     exe = sys.executable
     pythonw = exe.replace("python.exe", "pythonw.exe")
-    import os
     if not os.path.exists(pythonw):
         pythonw = exe
-    return f'"{pythonw}" -m irtracker watcher run'
+    return f'"{pythonw}" -m irtracker watcher run --quiet'
 
 
 def install() -> str:

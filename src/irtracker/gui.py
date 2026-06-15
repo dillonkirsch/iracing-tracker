@@ -729,19 +729,22 @@ class GuiApi:
         from irtracker import watcher as watcher_mod
         if watcher_mod.watcher_alive(cfg):
             return _ok(message="Auto-backup is already running.")
-        exe = sys.executable
-        pythonw = exe.replace("python.exe", "pythonw.exe")
-        if not os.path.exists(pythonw):
-            pythonw = exe
-        args = [pythonw, "-m", "irtracker", "watcher", "run"]
+        if getattr(sys, "frozen", False):
+            # the packaged .exe routes CLI args to the CLI (see launcher.py)
+            args = [sys.executable, "watcher", "run", "--quiet"]
+        else:
+            pythonw = sys.executable.replace("python.exe", "pythonw.exe")
+            if not os.path.exists(pythonw):
+                pythonw = sys.executable
+            args = [pythonw, "-m", "irtracker", "watcher", "run", "--quiet"]
         if self._config_arg:
             args += ["--config", self._config_arg]
-        flags = 0
-        creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | \
-            getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        # Detached + own process group so it keeps running after the GUI closes;
+        # no console window. (Don't combine DETACHED_PROCESS with CREATE_NO_WINDOW.)
+        flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
+                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
         try:
-            subprocess.Popen(args, creationflags=creationflags or flags,
-                             close_fds=True)
+            subprocess.Popen(args, creationflags=flags, close_fds=True)
         except Exception as exc:
             return _err(str(exc))
         return _ok(message="Auto-backup is now watching your iRacing folder.")
