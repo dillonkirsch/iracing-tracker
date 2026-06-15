@@ -134,9 +134,11 @@ def apply_update(exe_url: str, sha_url: str | None = None) -> dict:
         return {"ok": False, "error": f"Download failed: {exc}"}
 
     protected = not _dir_writable(current.parent)
-    # In a protected folder the helper runs elevated, so relaunch via explorer to
-    # drop back to normal privileges (don't keep running the app as admin).
-    relaunch = f'explorer.exe "{current}"' if protected else f'start "" "{current}"'
+    # Always relaunch via Explorer: it mimics a normal double-click (more reliable
+    # than 'start' from a window-less helper, which could hit a transient
+    # "Failed to load Python DLL" while AV finishes scanning the new exe) and it
+    # de-elevates if the helper had to run as admin.
+    relaunch = f'explorer.exe "{current}"'
     # A running .exe stays locked, so move/Y fails until the app exits. Just
     # retry the swap until it succeeds — that naturally waits for the unlock.
     # (Avoid tasklist/find to detect exit: those console tools hang when the
@@ -155,7 +157,8 @@ def apply_update(exe_url: str, sha_url: str | None = None) -> dict:
         "ping -n 2 127.0.0.1 >NUL",
         "goto retry",
         ":done",
-        'echo [update] replaced; relaunching >> "%LOG%"',
+        'echo [update] replaced; letting the new file settle, then relaunching >> "%LOG%"',
+        "ping -n 5 127.0.0.1 >NUL",
         relaunch,
         'del "%~f0"',
         "exit",
