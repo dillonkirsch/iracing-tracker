@@ -804,8 +804,9 @@ function renderSettings() {
   const wPaused = !!(o.watcher && o.watcher.paused);
 
   content.innerHTML = `
-    <div class="page-head"><h1 class="page-title">Settings</h1>
+    <div class="page-head spread"><div><h1 class="page-title">Settings</h1>
       <p class="page-sub">Control how your iRacing settings are protected.</p></div>
+      <button class="btn btn-sm" data-action="run-wizard">Run setup wizard</button></div>
 
     <p class="section-label">Health check</p>
     <div class="card">
@@ -1018,6 +1019,129 @@ async function refreshAll() {
   render();
 }
 
+/* ============================================================== FIRST-RUN WIZARD */
+const WIZ_STEPS = 5;
+
+function openWizard() {
+  const o = state.overview || {};
+  state.wizard = { step: 0, editFolder: false, backupDone: false, backupMsg: "", autoBackup: true };
+  renderWizard();
+}
+
+function closeWizard(markDone) {
+  state.wizard = null;
+  document.getElementById("wizardRoot").innerHTML = "";
+  if (markDone) api("mark_onboarded");
+  loadOverview().then(() => { renderSimChip(); render(); });
+}
+
+function logoUri() {
+  const link = document.querySelector('link[rel=icon]');
+  return link ? link.href : "";
+}
+
+function wizDots(step) {
+  let dots = "";
+  for (let i = 0; i < WIZ_STEPS; i++) dots += `<i class="${i === step ? "on" : ""}"></i>`;
+  return `<div class="wizard-dots">${dots}</div>`;
+}
+
+function renderWizard() {
+  const w = state.wizard;
+  if (!w) return;
+  const o = state.overview || {};
+  let body = "", actions = "";
+
+  if (w.step === 0) {
+    body = `<img class="wizard-logo" src="${logoUri()}" alt="">
+      <h2>Welcome to iRacing Config Tracker</h2>
+      <p class="lead">It quietly backs up your iRacing settings — controls, force feedback, graphics — so you can undo a bad change or recover your whole setup any time. No technical know-how needed.</p>`;
+    actions = `<button class="btn btn-ghost" data-action="wiz-skip">Skip setup</button>
+      <button class="btn btn-primary" data-action="wiz-next">Get started</button>`;
+  } else if (w.step === 1) {
+    const found = o.iracingDirExists;
+    const showInput = !found || w.editFolder;
+    body = `<h2>Your iRacing folder</h2>
+      <p class="lead">This is where iRacing stores your settings. We ${found ? "found it automatically." : "couldn't find it — please choose it."}</p>
+      ${showInput
+        ? `<div class="row-gap"><input class="search" id="wizFolder" style="margin-bottom:0;flex:1;min-width:0" value="${esc(o.iracingDir || "")}" placeholder="C:\\Users\\you\\Documents\\iRacing"><button class="btn btn-sm" data-action="wiz-browse">Browse…</button></div>`
+        : `<div class="card" style="display:flex;gap:10px;align-items:center"><span class="pill good"><span class="dot"></span>Found</span><span style="word-break:break-all;font-size:12.5px">${esc(o.iracingDir)}</span></div>
+           <p class="muted" style="font-size:12px;margin-top:8px;text-align:center"><a href="#" data-action="wiz-editfolder" style="color:var(--accent)">Choose a different folder</a></p>`}`;
+    actions = `<button class="btn btn-ghost" data-action="wiz-back">Back</button>
+      <button class="btn btn-primary" data-action="wiz-folder-next">Next</button>`;
+  } else if (w.step === 2) {
+    body = `<h2>Make your first backup</h2>
+      <p class="lead">We'll save a snapshot of your current settings — your safety net. You can come back to it any time.</p>
+      ${w.backupDone ? `<div class="card" style="display:flex;gap:10px;align-items:center"><span class="pill good"><span class="dot"></span>Done</span><span style="font-size:13px">${esc(w.backupMsg)}</span></div>` : ""}`;
+    actions = `<button class="btn btn-ghost" data-action="wiz-back">Back</button>` +
+      (w.backupDone
+        ? `<button class="btn btn-primary" data-action="wiz-next">Next</button>`
+        : `<button class="btn btn-primary" data-action="wiz-backup">Make my first backup</button>`);
+  } else if (w.step === 3) {
+    body = `<h2>Keep it backed up automatically</h2>
+      <p class="lead">Recommended: let it run quietly in the background and back up whenever your settings change — and start with Windows so you never have to think about it.</p>
+      <label class="row-gap" style="cursor:pointer;font-size:13.5px"><input type="checkbox" id="wizAuto" ${w.autoBackup ? "checked" : ""}> Automatically back up in the background and at startup</label>`;
+    actions = `<button class="btn btn-ghost" data-action="wiz-back">Back</button>
+      <button class="btn btn-primary" data-action="wiz-finish">Finish</button>`;
+  } else {
+    body = `<img class="wizard-logo" src="${logoUri()}" alt="">
+      <h2>You're all set! 🎉</h2>
+      <p class="lead">Your settings are protected. Open <b>Backup History</b> any time to see saved versions or restore one, or <b>Profiles</b> to switch between setups.</p>`;
+    actions = `<button class="btn btn-primary" data-action="wiz-done" style="margin:0 auto">Open the app</button>`;
+  }
+
+  document.getElementById("wizardRoot").innerHTML =
+    `<div class="wizard-bg"><div class="wizard">${wizDots(w.step)}${body}<div class="wizard-actions">${actions}</div></div></div>`;
+}
+
+async function wizBrowse() {
+  const r = await api("pick_folder");
+  if (r.ok && r.path) { const el = $("#wizFolder"); if (el) el.value = r.path; }
+  else if (!r.ok) toast(r.error, "bad");
+}
+
+async function wizFolderNext() {
+  const o = state.overview || {};
+  const input = $("#wizFolder");
+  const chosen = input ? input.value.trim() : (o.iracingDir || "");
+  if (input && chosen && chosen !== o.iracingDir) {
+    const r = await api("update_settings", chosen, null, false);
+    if (!r.ok) { toast(r.error, "bad"); return; }
+    await loadOverview();
+  }
+  if (!(state.overview || {}).iracingDirExists) {
+    toast("That folder doesn't exist — pick your iRacing folder.", "bad");
+    return;
+  }
+  state.wizard.step = 2;
+  renderWizard();
+}
+
+async function wizBackup() {
+  toast("Backing up…");
+  const r = await api("backup_now", "first setup");
+  if (!r.ok) { toast(r.error, "bad"); return; }
+  state.wizard.backupDone = true;
+  state.wizard.backupMsg = r.created
+    ? `Backed up ${Object.keys(r.files || {}).length} file(s).`
+    : (r.message || "Already backed up.");
+  await loadOverview();
+  renderWizard();
+}
+
+async function wizFinish() {
+  const auto = $("#wizAuto") ? $("#wizAuto").checked : false;
+  if (auto) {
+    const watch = await api("start_watcher");
+    const login = await api("set_autostart", true);
+    const ok = watch.ok || login.ok;
+    toast(ok ? "Auto-backup is on." : (watch.error || login.error || "Couldn't enable auto-backup."),
+          ok ? "good" : "bad");
+  }
+  state.wizard.step = 4;
+  renderWizard();
+}
+
 /* --------------------------------------------------------- event wiring */
 document.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-action]");
@@ -1049,6 +1173,15 @@ document.addEventListener("click", (e) => {
   if (a === "check-update") return doCheckUpdate();
   if (a === "do-update") return doUpdate();
   if (a === "open-release") return api("open_url", (state.update || {}).url);
+  if (a === "run-wizard") return openWizard();
+  if (a === "wiz-next") { state.wizard.step++; return renderWizard(); }
+  if (a === "wiz-back") { state.wizard.step--; return renderWizard(); }
+  if (a === "wiz-skip" || a === "wiz-done") return closeWizard(true);
+  if (a === "wiz-browse") return wizBrowse();
+  if (a === "wiz-editfolder") { e.preventDefault(); state.wizard.editFolder = true; return renderWizard(); }
+  if (a === "wiz-folder-next") return wizFolderNext();
+  if (a === "wiz-backup") return wizBackup();
+  if (a === "wiz-finish") return wizFinish();
 });
 
 document.querySelectorAll(".nav-item").forEach((b) =>
@@ -1068,6 +1201,9 @@ async function init() {
   hideBootScreen();          // first data is in — drop the loading screen
   renderSimChip();
   render();
+  // First launch (no backups yet and never onboarded) -> show the setup wizard.
+  const o = state.overview;
+  if (o && o.ok && o.snapshotCount === 0 && !o.onboarded) openWizard();
   // keep the sim chip + dashboard fresh
   setInterval(refreshOverviewQuiet, 15000);
   checkForUpdate();          // background; surfaces a banner if there's a newer build

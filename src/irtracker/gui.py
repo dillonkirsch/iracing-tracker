@@ -215,6 +215,7 @@ class GuiApi:
             pending=pending,
             snapshotCount=snapshot_count,
             protected=protected,
+            onboarded=(cfg.state_dir / "onboarded").exists(),
         )
 
     # -- history -----------------------------------------------------------------
@@ -893,6 +894,18 @@ class GuiApi:
         try:
             os.startfile(str(path))  # noqa: S606 - Windows Explorer, user-initiated
         except Exception as exc:
+            return _err(str(exc))
+        return _ok()
+
+    def mark_onboarded(self) -> dict:
+        """Remember that the first-run setup wizard has been completed/skipped."""
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        try:
+            cfg.state_dir.mkdir(parents=True, exist_ok=True)
+            (cfg.state_dir / "onboarded").write_text("1", encoding="utf-8")
+        except OSError as exc:
             return _err(str(exc))
         return _ok()
 

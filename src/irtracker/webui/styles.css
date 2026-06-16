@@ -392,6 +392,27 @@ body {
 .boot-text { color: var(--text-dim); font-size: 13px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ---- first-run wizard ---- */
+.wizard-bg {
+  position: fixed; inset: 0; z-index: 80; display: flex; align-items: center;
+  justify-content: center; padding: 20px;
+  background: radial-gradient(1000px 600px at 50% 30%, #14203c 0%, var(--bg) 60%);
+  animation: fade .15s ease;
+}
+.wizard {
+  width: 560px; max-width: 100%; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow); padding: 26px 26px 22px;
+}
+.wizard-logo { width: 64px; height: 64px; border-radius: 14px; display: block;
+  margin: 0 auto 14px; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+.wizard h2 { margin: 0 0 8px; font-size: 20px; text-align: center; }
+.wizard .lead { color: var(--text-dim); text-align: center; margin: 0 auto 16px;
+  line-height: 1.55; max-width: 440px; }
+.wizard-dots { display: flex; gap: 7px; justify-content: center; margin-bottom: 18px; }
+.wizard-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
+.wizard-dots i.on { background: var(--accent); }
+.wizard-actions { display: flex; justify-content: space-between; gap: 10px; margin-top: 22px; }
+
 .muted { color: var(--text-dim); }
 .mt-0 { margin-top: 0; }
 .row-gap { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }

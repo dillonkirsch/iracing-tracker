@@ -23,6 +23,7 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 | **Editable folders** | Change the iRacing folder and where backups are stored from Settings (with a native folder picker), optionally moving existing backups; saved back to `config.toml`. |
 | **Auto-update** | The packaged app checks GitHub Releases on startup and from Settings; one click downloads the new `.exe`, checksum-verifies it, swaps it in place, and relaunches. Shows a banner on Home when a newer build is available. |
 | **Reverse input lookup ("what does this do?")** | In Controls & Devices, press a key in the capture box (or type "Btn 5" / "Axis 3" / "Alt+P") to see which action(s) it's bound to — or "free". Also `gfcc whatis "<input>"` on the CLI. |
+| **First-run wizard** | On first launch (no backups yet) a friendly multi-step overlay walks new users through: welcome → confirm the iRacing folder → make the first backup → optionally enable auto-backup → done. Re-openable from Settings ("Run setup wizard"); an `onboarded` flag stops it reappearing. |
 
 ---
 
@@ -79,7 +80,6 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 | Feature | Value | Effort | Foundation / notes |
 |---|---|---|---|
 | **System-tray presence** — a tray icon with "Back up now" / status so it runs quietly in the background. (App icon itself: done.) | Med | Medium | App icon already shipped. |
-| **First-run wizard** — detect the iRacing folder, offer auto-backup, make the first baseline. | Med | Easy–Med | Detection + snapshot already exist. |
 | **Code-sign the exe** — kill the SmartScreen "unknown publisher" warning. | Med | Hard* | *Technically easy; needs a paid signing cert + process. |
 | **Cloud sync / multi-PC** — "back up to a private remote" button (survives reinstall; syncs PCs). | Med | Medium | Store is already a plain git repo. |
 | **Light theme toggle** — currently dark-only. | Low | Easy–Med | CSS variables already centralize the palette. |
