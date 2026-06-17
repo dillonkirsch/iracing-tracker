@@ -70,6 +70,20 @@ def test_ignored_keys_do_not_trigger_snapshot(tracker, cfg):
     assert b"windowedXPos=999" in tracker.repo.show_file("HEAD", "app.ini")
 
 
+def test_live_changes_ignores_ignored_only_diffs(tracker, cfg):
+    # A file whose only diff is an ignored key must NOT show as pending, or the
+    # "unsaved changes" warning could never be cleared by a backup.
+    write(cfg, "app.ini", APP_V1)
+    tracker.take_snapshot("manual")
+    assert tracker.live_changes() == {}
+
+    write(cfg, "app.ini", APP_V1.replace("windowedXPos=10", "windowedXPos=999"))
+    assert tracker.live_changes() == {}  # ignored-only -> not pending
+
+    write(cfg, "app.ini", APP_V2.replace("windowedXPos=10", "windowedXPos=999"))
+    assert tracker.live_changes() == {"app.ini": "modified"}  # real change -> pending
+
+
 def test_ignore_policy_file_never_snapshotted(tracker, cfg):
     write(cfg, "camera.ini", "[a]\nb=1\n")
     r = tracker.take_snapshot("manual")

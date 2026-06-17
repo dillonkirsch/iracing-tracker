@@ -349,7 +349,12 @@ class Tracker:
         return out
 
     def live_changes(self) -> dict[str, str]:
-        """What would be committed if a snapshot ran now (for `status`)."""
+        """What would be committed if a snapshot ran now (for `status`).
+
+        Mirrors take_snapshot's ignore-key suppression so a file whose only
+        difference is an ignored INI key (e.g. window position) is NOT reported
+        as pending -- otherwise a backup would never make the "unsaved changes"
+        warning go away."""
         changes: dict[str, str] = {}
         if not self.repo.initialized:
             return {n: "added" for n in self.cfg.tracked_files_present()}
@@ -367,8 +372,17 @@ class Tracker:
                 continue
             if not mirror.exists():
                 changes[name] = "added"
-            elif mirror.read_bytes() != data:
-                changes[name] = "modified"
+                continue
+            old = mirror.read_bytes()
+            if old == data:
+                continue
+            tp = self.cfg.policy_for(name)
+            if tp and tp.ignore_keys and name.lower().endswith(".ini"):
+                diffs = semdiff.diff_ini(
+                    old.decode("utf-8", "replace"), data.decode("utf-8", "replace"))
+                if semdiff.only_ignored_changes(diffs, tp.ignore_keys):
+                    continue  # only ignored keys differ -> a backup would skip it
+            changes[name] = "modified"
         return changes
 
 

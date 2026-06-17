@@ -145,8 +145,11 @@ function fmtDate(iso) {
 }
 function $(sel, root) { return (root || document).querySelector(sel); }
 
+const MAX_TOASTS = 4;
 function toast(msg, kind) {
   const wrap = $("#toastWrap");
+  // Cap the stack so rapid actions can't overflow the screen.
+  while (wrap.children.length >= MAX_TOASTS) wrap.removeChild(wrap.firstChild);
   const t = document.createElement("div");
   t.className = "toast " + (kind || "");
   t.textContent = msg;
@@ -929,9 +932,8 @@ async function doBackup() {
   toast("Backing up…");
   const r = await api("backup_now", null);
   if (!r.ok) { toast(r.error, "bad"); return; }
-  if (!r.created) { toast(r.message || "Already up to date.", "good"); return; }
-  toast("Backup saved.", "good");
-  await refreshAll();
+  toast(r.created ? "Backup saved." : (r.message || "Already up to date."), "good");
+  await refreshAll();  // always re-sync so the "unsaved changes" warning clears
 }
 
 async function doRestoreFile(rev, file) {
@@ -1223,7 +1225,7 @@ document.addEventListener("click", (e) => {
   if (a === "save-settings") return doSaveSettings();
   if (a === "identify") return doIdentify(($("#identifyInput") || {}).value);
   if (a === "refresh-controls") return renderControls();
-  if (a === "check-update") return doCheckUpdate();
+  if (a === "check-update") return doCheckUpdate(btn);
   if (a === "do-update") return doUpdate();
   if (a === "open-release") return api("open_url", (state.update || {}).url);
   if (a === "run-wizard") return openWizard();
@@ -1309,14 +1311,22 @@ function updatesCard() {
     </div>`;
 }
 
-async function doCheckUpdate() {
+async function doCheckUpdate(btn) {
+  if (state.checkingUpdate) return;        // ignore spam-clicks while one is in flight
+  state.checkingUpdate = true;
+  if (btn) btn.disabled = true;
   toast("Checking for updates…");
-  const u = await api("check_for_update");
-  state.update = u;
-  if (!u.ok) toast(u.error || "Couldn't check for updates.", "bad");
-  else if (u.updateAvailable) toast(`Update available: ${u.latest}`, "good");
-  else toast("You're on the latest version.", "good");
-  if (state.view === "settings" || state.view === "home") render();
+  try {
+    const u = await api("check_for_update");
+    state.update = u;
+    if (!u.ok) toast(u.error || "Couldn't check for updates.", "bad");
+    else if (u.updateAvailable) toast(`Update available: ${u.latest}`, "good");
+    else toast("You're on the latest version.", "good");
+    if (state.view === "settings" || state.view === "home") render();
+  } finally {
+    state.checkingUpdate = false;
+    if (btn && btn.isConnected) btn.disabled = false;
+  }
 }
 
 async function doUpdate() {
