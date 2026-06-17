@@ -535,6 +535,8 @@ class GuiApi:
         cfg = self._config()
         if cfg is None:
             return _err(self._cfg_error or "could not load configuration")
+        last_saved = None
+        is_live = not rev
         try:
             if rev:
                 data = Tracker(cfg).repo.show_file(rev, "controls.cfg")
@@ -546,6 +548,9 @@ class GuiApi:
                                error="No controls.cfg found in your iRacing folder yet.")
                 data = path.read_bytes()
                 source = "live"
+                from datetime import datetime
+                last_saved = datetime.fromtimestamp(
+                    path.stat().st_mtime).astimezone().isoformat(timespec="seconds")
         except Exception as exc:
             return _err(str(exc))
         try:
@@ -563,6 +568,8 @@ class GuiApi:
             available=True, source=source,
             bindings=bindings,
             conflicts=conflicts,
+            lastSaved=last_saved,
+            simRunning=(is_live and sim_running(cfg.sim_processes)),
             boundCount=sum(1 for b in bindings if b["kind"] != "unbound"),
             ffbNote="Force-feedback strength and pedal calibration are stored in "
                     "this file, but live inside an encoded block that isn't "
