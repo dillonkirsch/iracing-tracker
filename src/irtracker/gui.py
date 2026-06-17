@@ -62,6 +62,16 @@ def _err(message: str, **data: Any) -> dict:
     return {"ok": False, "error": message, **data}
 
 
+# Reserved tag namespace for "known-good" restore points, kept separate from
+# Saved Setups (which are plain user tags). Names are timestamped so the most
+# recent sorts last lexically.
+KNOWN_GOOD_PREFIX = "known-good/"
+
+
+def _is_known_good(tag: str) -> bool:
+    return tag.startswith(KNOWN_GOOD_PREFIX)
+
+
 def _tag_slug(name: str) -> str:
     """Turn a user-typed name into a valid git tag/ref (no spaces or special
     chars). 'VR setup' -> 'VR-setup'."""
@@ -153,7 +163,8 @@ class GuiApi:
             "track": s.meta.track,
             "message": s.meta.message,
             "files": self._files_clean(s.meta.files),
-            "tags": list(s.tags),
+            "tags": [t for t in s.tags if not _is_known_good(t)],
+            "knownGood": any(_is_known_good(t) for t in s.tags),
             "collapsed": s.meta.collapsed,
         }
 
@@ -195,6 +206,23 @@ class GuiApi:
 
         pending = [{"name": n, "kind": k} for n, k in sorted(tracker.live_changes().items())]
 
+        # Most recent known-good restore point (timestamped names sort
+        # chronologically, so the max name is the latest -- resolve only that one).
+        last_known_good = None
+        if repo.initialized and repo.head():
+            kg = [t for t in repo.list_tags() if _is_known_good(t[0])]
+            if kg:
+                name, commit, message = max(kg, key=lambda t: t[0])
+                last_known_good = {"tag": name, "rev": commit,
+                                   "label": message or "Known-good",
+                                   "date": None, "contextLabel": ""}
+                try:
+                    s = repo.snapshot_at(commit)
+                    last_known_good["date"] = s.author_date
+                    last_known_good["contextLabel"] = s.meta.context_label()
+                except Exception:
+                    pass
+
         protected = []
         for tp in cfg.tracked:
             if tp.policy != "ignore":
@@ -214,6 +242,7 @@ class GuiApi:
             autostartOn=bool(autostart),
             latest=latest,
             pending=pending,
+            lastKnownGood=last_known_good,
             snapshotCount=snapshot_count,
             protected=protected,
             onboarded=(cfg.state_dir / "onboarded").exists(),
@@ -459,6 +488,8 @@ class GuiApi:
             return _ok(items=[])
         items = []
         for name, commit, message in repo.list_tags():
+            if _is_known_good(name):
+                continue  # known-good restore points are their own thing
             entry = {"name": name, "rev": commit, "message": message,
                      "date": None, "files": {}, "contextLabel": ""}
             try:
@@ -503,6 +534,77 @@ class GuiApi:
 
     def delete_profile(self, name: str) -> dict:
         return self.delete_tag(name)
+
+    # -- known-good restore points (a "verified in a real session" safety net) --
+
+    def list_known_good(self) -> dict:
+        tracker = self._tracker()
+        if tracker is None:
+            return _err(self._cfg_error or "could not load configuration")
+        repo = tracker.repo
+        if not repo.initialized or not repo.head():
+            return _ok(items=[])
+        items = []
+        for name, commit, message in repo.list_tags():
+            if not _is_known_good(name):
+                continue
+            entry = {"tag": name, "label": message or "Known-good", "rev": commit,
+                     "date": None, "files": {}, "contextLabel": ""}
+            try:
+                s = repo.snapshot_at(commit)
+                entry["date"] = s.author_date
+                entry["files"] = self._files_clean(s.meta.files)
+                entry["contextLabel"] = s.meta.context_label()
+            except Exception:
+                pass
+            items.append(entry)
+        items.sort(key=lambda e: e["tag"], reverse=True)  # newest first
+        return _ok(items=items)
+
+    def mark_known_good(self, label: str | None = None) -> dict:
+        """Capture the current setup and mark it as a known-good restore point."""
+        tracker = self._tracker()
+        if tracker is None:
+            return _err(self._cfg_error or "could not load configuration")
+        running = sim_running(tracker.cfg.sim_processes)
+        car = track = None
+        if running:
+            ctx = ContextCache(tracker.cfg.state_dir).context
+            car, track = ctx.car, ctx.track
+        result = tracker.take_snapshot("manual", message="marked known-good",
+                                       sim_running=running, car=car, track=track)
+        rev = result.commit or tracker.repo.head()
+        if not rev:
+            return _err("There's nothing to mark yet — your iRacing folder looks empty.")
+        from datetime import datetime
+        now = datetime.now()
+        clean = (label or "").strip() or " @ ".join(p for p in (car, track) if p) \
+            or f"Known-good {now.strftime('%b %d')}"
+        tag = KNOWN_GOOD_PREFIX + now.strftime("%Y%m%d-%H%M%S")
+        try:
+            tracker.repo.create_tag(tag, rev, clean)
+        except Exception as exc:
+            return _err(str(exc))
+        return _ok(message=f'Marked your current setup as known-good ("{clean}").')
+
+    def revert_known_good(self, tag: str | None = None) -> dict:
+        """Restore the live folder to a known-good point (the latest by default)."""
+        if not tag:
+            items = self.list_known_good().get("items") or []
+            if not items:
+                return _err("You haven't marked a known-good setup yet.")
+            tag = items[0]["tag"]
+        return self.restore_baseline(tag)
+
+    def delete_known_good(self, tag: str) -> dict:
+        tracker = self._tracker()
+        if tracker is None:
+            return _err(self._cfg_error or "could not load configuration")
+        try:
+            tracker.repo.delete_tag(tag)
+        except Exception as exc:
+            return _err(str(exc))
+        return _ok(message="Removed that known-good mark.")
 
     def export_backup(self, rev: str) -> dict:
         tracker = self._tracker()

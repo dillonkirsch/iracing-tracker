@@ -255,7 +255,9 @@ class SnapshotRepo:
 
     def files_at(self, rev: str) -> list[str]:
         commit = self.resolve(rev)
-        out = self.git("ls-tree", "--name-only", commit).stdout
+        # -r so per-profile files (profiles/controls/<name>/controls.cfg) come
+        # back as full paths, not just the top-level "profiles" directory.
+        out = self.git("ls-tree", "-r", "--name-only", commit).stdout
         return [n for n in out.splitlines() if n and n != ".gitattributes"]
 
     def tracked_in_worktree(self) -> list[str]:

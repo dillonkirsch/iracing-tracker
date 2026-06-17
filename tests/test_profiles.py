@@ -137,6 +137,43 @@ def test_gui_controls_profile_selection(tmp_path, corpus_cfg_bytes):
     assert api.get_controls(profile="Nope")["profile"] == "Baseline"
 
 
+def test_known_good_restore_points(tmp_path, corpus_cfg_bytes):
+    from irtracker.gui import GuiApi
+    ira = tmp_path / "iRacing"; ira.mkdir()
+    (ira / "app.ini").write_text("[ControlProfiles]\nGlobal=Baseline\n", encoding="utf-8")
+    d = ira / "profiles" / "controls" / "Baseline"; d.mkdir(parents=True)
+    (d / "controls.cfg").write_bytes(corpus_cfg_bytes)
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(
+        f'[paths]\niracing_dir = "{ira.as_posix()}"\n'
+        f'data_dir = "{(tmp_path / "data").as_posix()}"\n'
+        f'[watcher]\nsim_processes = ["___no_such_sim___.exe"]\n', encoding="utf-8")
+    api = GuiApi(str(cfg_path))
+
+    # nothing marked yet
+    assert api.list_known_good()["items"] == []
+    assert api.get_overview()["lastKnownGood"] is None
+    assert not api.revert_known_good()["ok"]
+
+    # mark the current setup
+    assert api.mark_known_good("Road — Daytona")["ok"]
+    kg = api.list_known_good()["items"]
+    assert len(kg) == 1 and kg[0]["label"] == "Road — Daytona"
+    # a known-good point is NOT a Saved Setup, and the overview surfaces the latest
+    assert api.list_profiles()["items"] == []
+    assert api.get_overview()["lastKnownGood"]["label"] == "Road — Daytona"
+
+    # drift the live file, then one-click revert restores it
+    (d / "controls.cfg").write_bytes(b"GFCC locally broken")
+    assert api.revert_known_good()["ok"]
+    assert (d / "controls.cfg").read_bytes() == corpus_cfg_bytes
+
+    # removing the mark leaves files alone but clears the known-good point
+    assert api.delete_known_good(kg[0]["tag"])["ok"]
+    assert api.list_known_good()["items"] == []
+    assert api.get_overview()["lastKnownGood"] is None
+
+
 def test_migrates_legacy_bare_keys_into_active_profile(cfg, corpus_cfg_bytes):
     # 1) legacy install: controls.cfg at the top level, no profiles yet
     (cfg.iracing_dir / "controls.cfg").write_bytes(corpus_cfg_bytes)

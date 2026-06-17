@@ -24,6 +24,7 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 | **Auto-update** | The packaged app checks GitHub Releases on startup and from Settings; one click downloads the new `.exe`, checksum-verifies it, swaps it in place, and relaunches. Shows a banner on Home when a newer build is available. |
 | **Reverse input lookup ("what does this do?")** | In Controls & Devices, press a key in the capture box (or type "Btn 5" / "Axis 3" / "Alt+P") to see which action(s) it's bound to — or "free". Also `gfcc whatis "<input>"` on the CLI. |
 | **First-run wizard** | On first launch (no backups yet) a friendly multi-step overlay walks new users through: welcome → confirm the iRacing folder → make the first backup → optionally enable auto-backup → done. Re-openable from Settings ("Run setup wizard"); an `onboarded` flag stops it reappearing. |
+| **Known-good restore points** | Mark the current setup as "verified good in a real session" (a reserved `known-good/<timestamp>` tag namespace, kept separate from Saved Setups), then one-click **Revert to last known-good** from the Home dashboard. A "✓ Known-good" badge appears on those backups in History. Built on tags + `restore_baseline`; revert is sim-running-guarded + takes a safety backup first. |
 | **iRacing Control Profiles support** | iRacing's Control Profiles feature (May 2026) relocated controls.cfg/joyCalib.yaml into `profiles\controls\<name>\`, with the active profile named in `app.ini [ControlProfiles] Global`. The tracker resolves the live files through the active profile **and versions every profile independently** (one history per profile via `profiles/controls/<name>/…` repo keys), labels active-profile switches in history, and migrates pre-profiles history in place (rename, not delete+add). Per-profile labels in the UI (e.g. "Controls & Force Feedback · Oval profile"). The Controls & Devices view has a **profile picker** to browse any control profile's bindings/devices without switching the active one in-sim (default = active; a banner warns when viewing a non-active profile). The app's own tag-based feature was renamed **"Saved Setups"** to avoid the name clash. |
 
 ---
@@ -59,7 +60,6 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 |---|---|---|---|
 | **Config linter / sanity checker** — warn on out-of-bounds INI values (e.g. `maxWorkingSetMB_64` > physical RAM, stale VR keys) that cause stutter/crashes. | High | Medium | Needs a small rules table + system info (RAM). |
 | **Binding inventory** — human-readable list of every keyboard/wheel/pedal/button assignment. | Med | Easy | Codec already decodes; just format it. |
-| **Known-good restore points** — a dedicated "verified in use" designation separate from tags, with a one-click "revert to last known-good". | High | Easy | Special tag namespace + restore shortcut. |
 | **Orphaned-file cleanup** — detect files in `Documents\iRacing` no longer used by the current build / uninstalled content. | Low–Med | Medium | Hard to know "unused" reliably. |
 
 ---

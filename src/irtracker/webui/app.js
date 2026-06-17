@@ -311,6 +311,7 @@ function renderHome() {
         <button class="btn btn-sm btn-ghost" data-action="goto-history">View all →</button></div>
       ${backupSummary(o.latest)}</div>`;
   }
+  cards += knownGoodCard(o);
 
   content.innerHTML = `
     ${updateBanner()}
@@ -339,11 +340,43 @@ function backupSummary(s) {
   const ctx = s.contextLabel && s.contextLabel !== "manual edit"
     ? `<div class="tl-ctx">${icon("clock")} ${esc(s.contextLabel)}</div>` : "";
   const msg = s.message ? `<div class="tl-msg">“${esc(s.message)}”</div>` : "";
-  const tags = (s.tags || []).map((t) => `<span class="chip tag-chip">${icon("bookmark")}${esc(t)}</span>`).join("");
+  const tags = knownGoodChip(s) + (s.tags || []).map((t) => `<span class="chip tag-chip">${icon("bookmark")}${esc(t)}</span>`).join("");
   return `<div class="tl-top"><span class="tl-reason">${esc(triggerLabel(s.trigger))}</span>
       <span class="tl-date">${esc(fmtDate(s.date))}</span></div>
     ${ctx}${msg}
     <div class="tl-files">${fileChips(s.files)}${tags}</div>`;
+}
+
+function knownGoodChip(s) {
+  return s && s.knownGood
+    ? `<span class="chip tag-chip">${icon("shieldCheck")} Known-good</span>` : "";
+}
+
+function knownGoodCard(o) {
+  const kg = o.lastKnownGood;
+  if (kg) {
+    const when = kg.date ? fmtDate(kg.date) : "";
+    const ctx = kg.contextLabel && kg.contextLabel !== "manual edit" ? ` · ${esc(kg.contextLabel)}` : "";
+    return `<div class="card">
+      <div class="spread"><p class="section-label mt-0">${icon("shieldCheck")} Known-good restore point</p>
+        <button class="btn btn-sm btn-ghost" data-action="mark-known-good">Mark current as known-good</button></div>
+      <div class="file-row" style="border:0;padding-bottom:0">
+        <div class="file-ico">${icon("shieldCheck")}</div>
+        <div><div class="file-name">${esc(kg.label)}</div>
+          <div class="file-desc">Verified ${esc(when)}${esc(ctx)}</div></div>
+        <div class="row-gap">
+          <button class="btn btn-sm btn-primary" data-action="revert-known-good" data-tag="${esc(kg.tag)}">${icon("rotate")} Revert to this</button>
+          <button class="btn btn-sm btn-ghost" data-action="delete-known-good" data-tag="${esc(kg.tag)}" title="Remove this mark">✕</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  if (o.snapshotCount === 0) return "";  // nothing to mark yet
+  return `<div class="card">
+    <p class="section-label mt-0">${icon("shieldCheck")} Known-good restore point</p>
+    <p class="muted" style="font-size:12.5px;margin:6px 0 12px">When a setup feels right after a real session, mark it “known-good.” You’ll get a one-click button to jump straight back to it if a later change makes things worse.</p>
+    <button class="btn btn-primary" data-action="mark-known-good">Mark current setup as known-good</button>
+  </div>`;
 }
 
 function renderHomeAside() {
@@ -455,7 +488,7 @@ async function showBackupDetail(rev) {
   const s = state.history.find((x) => x.rev === rev);
   if (!s) return;
   const aside = $("#aside");
-  const tags = (s.tags || []).map((t) => `<span class="chip tag-chip">${icon("bookmark")}${esc(t)}</span>`).join("");
+  const tags = knownGoodChip(s) + (s.tags || []).map((t) => `<span class="chip tag-chip">${icon("bookmark")}${esc(t)}</span>`).join("");
   aside.innerHTML = `
     <p class="section-label">Backup details</p>
     <div class="card" style="padding:14px">
@@ -936,6 +969,46 @@ async function doBackup() {
   await refreshAll();  // always re-sync so the "unsaved changes" warning clears
 }
 
+async function doMarkKnownGood() {
+  const name = await promptModal({
+    title: "Mark current setup as known-good",
+    body: "Give it a label you’ll recognize — like “Road — Daytona” or “FFB I liked at Spa.” (Optional.)",
+    placeholder: "e.g. Road — Daytona", confirmLabel: "Mark known-good",
+  });
+  if (name === null) return;  // cancelled
+  toast("Marking known-good…");
+  const r = await api("mark_known_good", name || null);
+  toast(r.ok ? r.message : r.error, r.ok ? "good" : "bad");
+  if (r.ok) await refreshAll();
+}
+
+async function doRevertKnownGood(tag) {
+  const kg = state.overview && state.overview.lastKnownGood;
+  const label = kg ? kg.label : "your last known-good setup";
+  const ok = await confirmModal({
+    title: "Revert to known-good?",
+    body: `This sets your live iRacing files back to <b>${esc(label)}</b>. A safety backup of your current setup is made first, so it's reversible.`,
+    confirmLabel: "Revert", danger: false,
+  });
+  if (!ok) return;
+  const r = await api("revert_known_good", tag || null);
+  if (!r.ok && r.simBlocked) { toast(r.error, "bad"); return; }
+  toast(r.ok ? r.message : r.error, r.ok ? "good" : "bad");
+  if (r.ok) await refreshAll();
+}
+
+async function doDeleteKnownGood(tag) {
+  const ok = await confirmModal({
+    title: "Remove this known-good mark?",
+    body: "This only removes the “known-good” label. Your backups and live files are left untouched.",
+    confirmLabel: "Remove", danger: true,
+  });
+  if (!ok) return;
+  const r = await api("delete_known_good", tag);
+  toast(r.ok ? r.message : r.error, r.ok ? "good" : "bad");
+  if (r.ok) await refreshAll();
+}
+
 async function doRestoreFile(rev, file) {
   const ok = await confirmModal({
     title: `Restore ${fileLabel(file)}?`,
@@ -1214,6 +1287,9 @@ document.addEventListener("click", (e) => {
   if (a === "bookmark") return doBookmark(rev);
   if (a === "export") return doExport(rev);
   if (a === "remap") return doRemap(btn.dataset.old, btn.dataset.new);
+  if (a === "mark-known-good") return doMarkKnownGood();
+  if (a === "revert-known-good") return doRevertKnownGood(btn.dataset.tag);
+  if (a === "delete-known-good") return doDeleteKnownGood(btn.dataset.tag);
   if (a === "save-profile") return doSaveProfile();
   if (a === "apply-profile") return doApplyProfile(btn.dataset.name);
   if (a === "delete-profile") return doDeleteProfile(btn.dataset.name);
