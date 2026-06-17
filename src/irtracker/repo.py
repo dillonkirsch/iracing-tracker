@@ -17,6 +17,11 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+# Hide the console window when shelling out to git. Without this, a windowed
+# (no-console) app like the packaged GUI/watcher pops a brief console window on
+# every git call, which flickers and steals focus from other apps.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 META_PREFIX = "snapshot-meta: "
 
 TRIGGER_LABELS = {
@@ -99,7 +104,7 @@ class SnapshotRepo:
             text: bool = True) -> subprocess.CompletedProcess:
         proc = subprocess.run(
             ["git", "-C", str(self.dir), *args],
-            capture_output=True, text=text,
+            capture_output=True, text=text, creationflags=_NO_WINDOW,
         )
         if check and proc.returncode != 0:
             err = proc.stderr if text else proc.stderr.decode("utf-8", "replace")
