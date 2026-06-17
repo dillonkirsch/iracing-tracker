@@ -545,8 +545,10 @@ async function doExportCompare() {
 async function renderControls() {
   const content = $("#content");
   content.innerHTML = `<div class="loading">Reading your controls…</div>`;
-  if (!state.controls) state.controls = await api("get_controls");
-  if (!state.devices) state.devices = await api("get_devices");
+  // Always re-read the live controls.cfg: it changes outside the app (you rebind
+  // in iRacing), so a cached copy would show stale bindings/conflicts.
+  state.controls = await api("get_controls");
+  state.devices = await api("get_devices");
   const c = state.controls;
 
   if (!c.ok || !c.available) {
@@ -559,8 +561,9 @@ async function renderControls() {
   }
 
   content.innerHTML = `
-    <div class="page-head"><h1 class="page-title">Controls &amp; Devices</h1>
+    <div class="page-head spread"><div><h1 class="page-title">Controls &amp; Devices</h1>
       <p class="page-sub">How your wheel, pedals, and keyboard are mapped in iRacing. This view is read-only.</p></div>
+      <button class="btn btn-sm" data-action="refresh-controls">${icon("rotate")} Refresh</button></div>
     <div class="card" style="padding:14px;margin-bottom:16px;display:flex;gap:12px;align-items:flex-start">
       ${icon("alert", "ico")}
       <p class="muted mt-0" style="font-size:12.5px">${esc(c.ffbNote)}</p>
@@ -1170,6 +1173,7 @@ document.addEventListener("click", (e) => {
   if (a === "browse-data") return doBrowse("setData");
   if (a === "save-settings") return doSaveSettings();
   if (a === "identify") return doIdentify(($("#identifyInput") || {}).value);
+  if (a === "refresh-controls") return renderControls();
   if (a === "check-update") return doCheckUpdate();
   if (a === "do-update") return doUpdate();
   if (a === "open-release") return api("open_url", (state.update || {}).url);

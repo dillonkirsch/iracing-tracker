@@ -14,6 +14,11 @@ import winreg
 
 log = logging.getLogger(__name__)
 
+# Hide the console window when shelling out to schtasks (otherwise a windowed
+# app flickers a console on every call, e.g. the autostart status check that
+# runs on each dashboard refresh).
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 TASK_NAME = "iRacing Config Tracker Watcher"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_VALUE = "iRacingConfigTrackerWatcher"
@@ -36,7 +41,7 @@ def install() -> str:
     cmd = _watcher_command()
     proc = subprocess.run(
         ["schtasks", "/Create", "/F", "/SC", "ONLOGON", "/TN", TASK_NAME, "/TR", cmd],
-        capture_output=True, text=True)
+        capture_output=True, text=True, creationflags=_NO_WINDOW)
     if proc.returncode == 0:
         log.info("installed scheduled task %r", TASK_NAME)
         return f'scheduled task "{TASK_NAME}" (runs at logon)'
@@ -51,7 +56,7 @@ def install() -> str:
 def uninstall() -> list[str]:
     removed = []
     proc = subprocess.run(["schtasks", "/Delete", "/F", "/TN", TASK_NAME],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, creationflags=_NO_WINDOW)
     if proc.returncode == 0:
         removed.append(f'scheduled task "{TASK_NAME}"')
     try:
@@ -67,7 +72,7 @@ def uninstall() -> list[str]:
 def installed_status() -> list[str]:
     found = []
     proc = subprocess.run(["schtasks", "/Query", "/TN", TASK_NAME],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, creationflags=_NO_WINDOW)
     if proc.returncode == 0:
         found.append(f'scheduled task "{TASK_NAME}"')
     try:
