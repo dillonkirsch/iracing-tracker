@@ -34,15 +34,20 @@ DEFAULT_SIM_PROCESSES = ["iRacingSim64DX11.exe", "iRacingSimAV2DX11.exe", "iRaci
 PROFILE_RELATIVE_FILES = {"controls.cfg", "joycalib.yaml"}  # matched lowercase
 
 
-def active_control_profile(iracing_dir: Path) -> str | None:
-    """Active control-profile name from app.ini's [ControlProfiles] Global key,
-    or None on legacy installs that keep controls.cfg at the top level."""
-    try:
-        text = (iracing_dir / "app.ini").read_text(encoding="utf-8-sig", errors="replace")
-    except OSError:
-        return None
+CONTROLS_SUBDIR = "profiles/controls"  # iRacing's per-profile controls folder
+
+
+def is_sidecar(name: str) -> bool:
+    """True for the derived controls.decoded.json, at any depth (per-profile)."""
+    from pathlib import PurePosixPath
+
+    return PurePosixPath(name.replace("\\", "/")).name == SIDECAR_NAME
+
+
+def control_profile_in_text(app_ini_text: str) -> str | None:
+    """Active control-profile name from app.ini text ([ControlProfiles] Global)."""
     section: str | None = None
-    for raw in text.splitlines():
+    for raw in app_ini_text.splitlines():
         line = raw.split(";", 1)[0].strip()  # iRacing .ini uses ';' inline comments
         if not line:
             continue
@@ -54,6 +59,16 @@ def active_control_profile(iracing_dir: Path) -> str | None:
             if key.strip().lower() == "global":
                 return val.strip() or None
     return None
+
+
+def active_control_profile(iracing_dir: Path) -> str | None:
+    """Active control-profile name, or None on legacy installs that keep
+    controls.cfg at the top level."""
+    try:
+        text = (iracing_dir / "app.ini").read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return None
+    return control_profile_in_text(text)
 
 DEFAULT_CONFIG_TOML = """\
 # iRacing Config Tracker configuration.
@@ -157,10 +172,15 @@ class Config:
         return self.data_dir / "state"
 
     def live_path(self, name: str) -> Path:
-        """On-disk path of a tracked file. controls.cfg / joyCalib.yaml follow the
-        active control profile (iRacing's profiles feature); every other file
-        lives at the top of iracing_dir. Falls back to the top level when no
-        profile is active or the profile folder is missing."""
+        """On-disk path of a tracked key.
+
+        A profile-relative key (``profiles/controls/<profile>/controls.cfg``)
+        maps straight through. A bare ``controls.cfg`` / ``joyCalib.yaml``
+        resolves to the *currently-active* control profile (used by the live
+        Controls view and re-map), falling back to the top level on legacy
+        installs. Every other name is a top-level file."""
+        if "/" in name or "\\" in name:
+            return self.iracing_dir / name
         if name.lower() in PROFILE_RELATIVE_FILES:
             profile = active_control_profile(self.iracing_dir)
             if profile:
@@ -170,38 +190,56 @@ class Config:
         return self.iracing_dir / name
 
     def policy_for(self, name: str) -> TrackedPattern | None:
-        """Match a live-folder filename against tracked patterns (first match wins)."""
+        """Match a tracked key against tracked patterns by basename (first match
+        wins). Keys may be bare names or profile-relative paths."""
         from fnmatch import fnmatch
+        from pathlib import PurePosixPath
 
-        if name == SIDECAR_NAME:
+        base = PurePosixPath(name.replace("\\", "/")).name
+        if base == SIDECAR_NAME:
             return None
         for tp in self.tracked:
-            if fnmatch(name.lower(), tp.pattern.lower()):
+            if fnmatch(base.lower(), tp.pattern.lower()):
                 return tp
         return None
 
-    def tracked_files_present(self) -> list[str]:
-        """Names of tracked (non-ignore) files present in the live folder.
+    def control_profiles_dir(self) -> Path:
+        return self.iracing_dir / "profiles" / "controls"
 
-        Files relocated into a control-profile subfolder are included by their
-        logical name even though the top-level copy may be stale or absent."""
+    def control_profile_files(self) -> list[str]:
+        """Profile-relative keys for every control profile's tracked files,
+        e.g. ``profiles/controls/Oval/controls.cfg``."""
+        out: list[str] = []
+        pdir = self.control_profiles_dir()
+        if not pdir.is_dir():
+            return out
+        for sub in sorted(p for p in pdir.iterdir() if p.is_dir()):
+            for fname in ("controls.cfg", "joyCalib.yaml"):
+                tp = self.policy_for(fname)
+                if tp and tp.policy != "ignore" and (sub / fname).is_file():
+                    out.append(f"{CONTROLS_SUBDIR}/{sub.name}/{fname}")
+        return out
+
+    def tracked_files_present(self) -> list[str]:
+        """Tracked (non-ignore) keys present live: top-level files plus each
+        control profile's files as profile-relative keys.
+
+        Once iRacing's control-profiles layout is in use, the top-level
+        controls.cfg/joyCalib.yaml are stale migration leftovers and are
+        skipped in favour of the per-profile copies."""
         names: list[str] = []
         if not self.iracing_dir.is_dir():
             return names
-        seen: set[str] = set()
+        has_profiles = self.control_profiles_dir().is_dir()
         for entry in sorted(self.iracing_dir.iterdir()):
             if not entry.is_file():
                 continue
+            if has_profiles and entry.name.lower() in PROFILE_RELATIVE_FILES:
+                continue  # superseded by the per-profile copy
             tp = self.policy_for(entry.name)
             if tp and tp.policy != "ignore":
                 names.append(entry.name)
-                seen.add(entry.name.lower())
-        for name in ("controls.cfg", "joyCalib.yaml"):
-            if name.lower() in seen:
-                continue
-            tp = self.policy_for(name)
-            if tp and tp.policy != "ignore" and self.live_path(name).exists():
-                names.append(name)
+        names.extend(self.control_profile_files())
         return names
 
 

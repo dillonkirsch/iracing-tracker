@@ -51,10 +51,22 @@ const FILE_LABELS = {
   "fueldata.ini": "Fuel Data",
   "camera.ini": "Camera Settings",
 };
+// Tracked keys may be bare names (app.ini) or profile-relative paths
+// (profiles/controls/Oval/controls.cfg).
+function keyBase(name) {
+  const s = String(name).replace(/\\/g, "/");
+  return s.slice(s.lastIndexOf("/") + 1);
+}
+function keyProfile(name) {
+  const m = String(name).replace(/\\/g, "/").match(/^profiles\/controls\/([^/]+)\//i);
+  return m ? m[1] : null;
+}
 function fileLabel(name) {
-  if (FILE_LABELS[name]) return FILE_LABELS[name];
-  if (/^rendererDX11/i.test(name)) return "Monitor / Graphics Renderer";
-  return name;
+  const base = keyBase(name);
+  const label = FILE_LABELS[base]
+    || (/^rendererDX11/i.test(base) ? "Monitor / Graphics Renderer" : base);
+  const prof = keyProfile(name);
+  return prof ? `${label} · ${prof} profile` : label;
 }
 
 const TRIGGER_LABELS = {
@@ -95,12 +107,13 @@ const ICONS = {
   rotate: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
 };
 function fileIconName(name) {
-  if (name === "controls.cfg") return "gamepad";
-  if (name === "joyCalib.yaml") return "wheel";
-  if (name === "fueldata.ini") return "droplet";
-  if (name === "core.ini") return "sliders";
-  if (name === "camera.ini") return "camera";
-  if (/^app\.ini$|^renderer/i.test(name)) return "monitor";
+  const base = keyBase(name);
+  if (base === "controls.cfg") return "gamepad";
+  if (base === "joyCalib.yaml") return "wheel";
+  if (base === "fueldata.ini") return "droplet";
+  if (base === "core.ini") return "sliders";
+  if (base === "camera.ini") return "camera";
+  if (/^app\.ini$|^renderer/i.test(base)) return "monitor";
   return "doc";
 }
 function icon(name, cls) {

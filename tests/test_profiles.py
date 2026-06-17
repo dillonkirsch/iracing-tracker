@@ -1,9 +1,9 @@
-"""iRacing control-profiles resolution.
+"""iRacing control-profiles: per-profile versioning.
 
-iRacing's "control profiles" feature relocates controls.cfg/joyCalib.yaml into
-profiles\\controls\\<active>\\; the active profile name lives in app.ini's
-[ControlProfiles] Global key. The tracker must follow it (read, scan, restore)
-while every other tracked file stays at the top of the iRacing folder.
+iRacing's "control profiles" feature stores each named profile's controls.cfg /
+joyCalib.yaml under profiles\\controls\\<name>\\, with the active profile named
+in app.ini's [ControlProfiles] Global key. The tracker versions every profile
+independently (one repo key per profile file) while top-level files stay flat.
 """
 from irtracker.config import active_control_profile
 from irtracker.snapshot import Tracker
@@ -14,68 +14,123 @@ APP_WITH_PROFILE = (
 )
 
 
-def _profile_dir(cfg, name="Oval"):
+def _profile(cfg, name, controls=b"", joycalib=None):
     d = cfg.iracing_dir / "profiles" / "controls" / name
     d.mkdir(parents=True, exist_ok=True)
+    if controls is not None:
+        (d / "controls.cfg").write_bytes(controls)
+    if joycalib is not None:
+        (d / "joyCalib.yaml").write_bytes(joycalib)
     return d
 
 
 def test_active_control_profile_parsing(cfg):
     assert active_control_profile(cfg.iracing_dir) is None  # no app.ini -> legacy
     (cfg.iracing_dir / "app.ini").write_text(APP_WITH_PROFILE, encoding="utf-8")
-    # only the [ControlProfiles] Global key counts, not the earlier bare 'global='
+    # only [ControlProfiles] Global counts, not the earlier bare 'global='
     assert active_control_profile(cfg.iracing_dir) == "Oval"
 
 
-def test_live_path_follows_active_profile(cfg):
-    # legacy (no profile): everything is top-level
+def test_live_path_resolution(cfg):
+    # legacy bare name (no profile) -> top level
     assert cfg.live_path("controls.cfg") == cfg.iracing_dir / "controls.cfg"
 
     (cfg.iracing_dir / "app.ini").write_text(APP_WITH_PROFILE, encoding="utf-8")
-    # profile named but its folder doesn't exist yet -> still fall back
-    assert cfg.live_path("controls.cfg") == cfg.iracing_dir / "controls.cfg"
-
-    pdir = _profile_dir(cfg)
-    assert cfg.live_path("controls.cfg") == pdir / "controls.cfg"
-    assert cfg.live_path("joyCalib.yaml") == pdir / "joyCalib.yaml"
+    _profile(cfg, "Oval")
+    # a bare name resolves to the *active* profile (live Controls view / re-map)
+    assert cfg.live_path("controls.cfg") == cfg.iracing_dir / "profiles" / "controls" / "Oval" / "controls.cfg"
+    # an explicit profile-relative key maps straight through (any profile)
+    assert cfg.live_path("profiles/controls/Road/controls.cfg") == \
+        cfg.iracing_dir / "profiles" / "controls" / "Road" / "controls.cfg"
     # non-profile files never move
     assert cfg.live_path("app.ini") == cfg.iracing_dir / "app.ini"
 
 
-def test_tracked_files_present_finds_profile_file(cfg, corpus_cfg_bytes):
+def test_tracked_files_present_uses_profile_keys(cfg, corpus_cfg_bytes):
     (cfg.iracing_dir / "app.ini").write_text(APP_WITH_PROFILE, encoding="utf-8")
-    pdir = _profile_dir(cfg)
-    (pdir / "controls.cfg").write_bytes(corpus_cfg_bytes)
-    present = cfg.tracked_files_present()
-    assert "controls.cfg" in present  # found via the profile folder
-    assert "app.ini" in present
-    # tracked even though no top-level copy exists
-    assert not (cfg.iracing_dir / "controls.cfg").exists()
-
-
-def test_snapshot_reads_profile_not_stale_toplevel(cfg, corpus_cfg_bytes):
-    (cfg.iracing_dir / "app.ini").write_text(APP_WITH_PROFILE, encoding="utf-8")
-    prof = _profile_dir(cfg) / "controls.cfg"
-    prof.write_bytes(corpus_cfg_bytes)
-    # a stale top-level leftover (iRacing's migration artifact) must be ignored
+    _profile(cfg, "Oval", controls=corpus_cfg_bytes)
+    _profile(cfg, "Road", controls=corpus_cfg_bytes)
+    # a stale top-level leftover must be ignored once profiles exist
     (cfg.iracing_dir / "controls.cfg").write_bytes(b"stale leftover")
 
-    tracker = Tracker(cfg)
-    assert tracker.take_snapshot("manual").committed
-    assert tracker.repo.show_file("HEAD", "controls.cfg") == corpus_cfg_bytes
+    present = cfg.tracked_files_present()
+    assert "profiles/controls/Oval/controls.cfg" in present
+    assert "profiles/controls/Road/controls.cfg" in present
+    assert "app.ini" in present
+    assert "controls.cfg" not in present  # the stale top-level copy is skipped
 
 
-def test_restore_writes_back_into_profile_folder(cfg, corpus_cfg_bytes):
+def test_each_profile_versioned_separately(cfg, corpus_cfg_bytes):
     (cfg.iracing_dir / "app.ini").write_text(APP_WITH_PROFILE, encoding="utf-8")
-    prof = _profile_dir(cfg) / "controls.cfg"
-    prof.write_bytes(corpus_cfg_bytes)
-    stale = cfg.iracing_dir / "controls.cfg"
-    stale.write_bytes(b"stale leftover")
+    _profile(cfg, "Oval", controls=corpus_cfg_bytes)
+    _profile(cfg, "Road", controls=corpus_cfg_bytes)
+    (cfg.iracing_dir / "controls.cfg").write_bytes(b"stale leftover")  # ignored
+
+    tracker = Tracker(cfg)
+    r = tracker.take_snapshot("manual")
+    assert r.committed
+    # both profiles are committed under their own keys; the stale top-level isn't
+    assert tracker.repo.show_file("HEAD", "profiles/controls/Oval/controls.cfg") == corpus_cfg_bytes
+    assert tracker.repo.show_file("HEAD", "profiles/controls/Road/controls.cfg") == corpus_cfg_bytes
+    assert not tracker.repo.file_exists_at("HEAD", "controls.cfg")
+
+    # editing ONE profile only versions that profile
+    (cfg.iracing_dir / "profiles" / "controls" / "Oval" / "controls.cfg").write_bytes(b"GFCC edited oval")
+    r2 = tracker.take_snapshot("event")
+    assert "profiles/controls/Oval/controls.cfg" in r2.files
+    assert "profiles/controls/Road/controls.cfg" not in r2.files
+
+
+def test_restore_targets_the_right_profile(cfg, corpus_cfg_bytes):
+    (cfg.iracing_dir / "app.ini").write_text(APP_WITH_PROFILE, encoding="utf-8")
+    oval = _profile(cfg, "Oval", controls=corpus_cfg_bytes) / "controls.cfg"
+    road = _profile(cfg, "Road", controls=corpus_cfg_bytes) / "controls.cfg"
 
     tracker = Tracker(cfg)
     tracker.take_snapshot("manual")
-    prof.write_bytes(b"locally changed")  # user edits the profile file
+    oval.write_bytes(b"GFCC oval changed")
+    road.write_bytes(b"GFCC road changed")
 
-    tracker.restore_file("controls.cfg", "HEAD", sim_is_running=False)
-    assert prof.read_bytes() == corpus_cfg_bytes          # profile restored
-    assert stale.read_bytes() == b"stale leftover"        # top-level untouched
+    tracker.restore_file("profiles/controls/Oval/controls.cfg", "HEAD", sim_is_running=False)
+    assert oval.read_bytes() == corpus_cfg_bytes        # Oval restored
+    assert road.read_bytes() == b"GFCC road changed"    # Road untouched
+
+
+def test_active_profile_switch_is_labelled(cfg, corpus_cfg_bytes):
+    (cfg.iracing_dir / "app.ini").write_text(
+        "[ControlProfiles]\nGlobal=Oval\n", encoding="utf-8")
+    _profile(cfg, "Oval", controls=corpus_cfg_bytes)
+    _profile(cfg, "Road", controls=corpus_cfg_bytes)
+    tracker = Tracker(cfg)
+    tracker.take_snapshot("manual")
+    # user switches the active profile in iRacing -> app.ini Global changes
+    (cfg.iracing_dir / "app.ini").write_text(
+        "[ControlProfiles]\nGlobal=Road\n", encoding="utf-8")
+    r = tracker.take_snapshot("event")
+    assert r.committed
+    assert tracker.repo.snapshot_at("HEAD").meta.message == \
+        "Switched active control profile: Oval → Road"
+
+
+def test_migrates_legacy_bare_keys_into_active_profile(cfg, corpus_cfg_bytes):
+    # 1) legacy install: controls.cfg at the top level, no profiles yet
+    (cfg.iracing_dir / "controls.cfg").write_bytes(corpus_cfg_bytes)
+    tracker = Tracker(cfg)
+    tracker.take_snapshot("manual")
+    assert tracker.repo.file_exists_at("HEAD", "controls.cfg")
+
+    # 2) iRacing introduces control profiles and moves the file into Baseline
+    (cfg.iracing_dir / "controls.cfg").unlink()
+    (cfg.iracing_dir / "app.ini").write_text(
+        "[ControlProfiles]\nGlobal=Baseline\n", encoding="utf-8")
+    _profile(cfg, "Baseline", controls=corpus_cfg_bytes)
+
+    tracker.take_snapshot("startup_scan")
+    # the bare key is gone; the profile key carries the content, and git history
+    # for the file is continuous (the migration was a rename, not delete+add)
+    assert not tracker.repo.file_exists_at("HEAD", "controls.cfg")
+    assert tracker.repo.show_file("HEAD", "profiles/controls/Baseline/controls.cfg") == corpus_cfg_bytes
+    follow = tracker.repo.git(
+        "log", "--follow", "--format=%H", "--",
+        "profiles/controls/Baseline/controls.cfg").stdout.strip().splitlines()
+    assert len(follow) >= 2  # pre-migration commit is reachable through the rename

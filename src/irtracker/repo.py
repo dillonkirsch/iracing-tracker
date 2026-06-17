@@ -102,9 +102,13 @@ class SnapshotRepo:
 
     def git(self, *args: str, check: bool = True,
             text: bool = True) -> subprocess.CompletedProcess:
+        # Force UTF-8 for text mode: git stores commit messages/metadata as UTF-8
+        # bytes, but Python would otherwise decode them with the Windows locale
+        # (cp1252), corrupting non-ASCII (accented car/track names, the → arrow).
         proc = subprocess.run(
             ["git", "-C", str(self.dir), *args],
             capture_output=True, text=text, creationflags=_NO_WINDOW,
+            **({"encoding": "utf-8", "errors": "replace"} if text else {}),
         )
         if check and proc.returncode != 0:
             err = proc.stderr if text else proc.stderr.decode("utf-8", "replace")

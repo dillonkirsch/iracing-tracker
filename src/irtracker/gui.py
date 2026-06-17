@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from irtracker.config import (
-    SIDECAR_NAME, Config, active_control_profile, config_path, load_config)
+    SIDECAR_NAME, Config, active_control_profile, config_path, is_sidecar, load_config)
 from irtracker.gfcc import codec
 from irtracker.gfcc.codec import GfccError
 from irtracker.gfcc.patch import remap_device, remap_joycalib
@@ -138,7 +138,7 @@ class GuiApi:
 
     @staticmethod
     def _files_clean(files: dict[str, str]) -> dict[str, str]:
-        return {n: k for n, k in files.items() if n != SIDECAR_NAME}
+        return {n: k for n, k in files.items() if not is_sidecar(n)}
 
     def _snap_dict(self, s: Snapshot) -> dict:
         from irtracker.repo import TRIGGER_LABELS
@@ -267,7 +267,7 @@ class GuiApi:
         if not repo.initialized or not repo.head():
             return _ok(files=[])
         names = {n for n in repo.files_at("HEAD")} | set(cfg.tracked_files_present())
-        names.discard(SIDECAR_NAME)
+        names = {n for n in names if not is_sidecar(n)}
         files = []
         for name in sorted(names):
             old = repo.show_file("HEAD", name) if repo.file_exists_at("HEAD", name) else None
@@ -293,7 +293,7 @@ class GuiApi:
             names |= set(cfg.tracked_files_present())
         else:
             names |= set(repo.files_at(rev_b))
-        names.discard(SIDECAR_NAME)
+        names = {n for n in names if not is_sidecar(n)}
         files = []
         for name in sorted(names):
             old = repo.show_file(rev_a, name) if repo.file_exists_at(rev_a, name) else None

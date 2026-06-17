@@ -36,10 +36,13 @@ def _populate() -> str:
     # Mirror iRacing's control-profiles layout: controls.cfg/joyCalib.yaml live in
     # a profile subfolder named by app.ini's [ControlProfiles] Global key.
     (ira / "app.ini").write_text("[ControlProfiles]\nGlobal=Baseline\n", encoding="utf-8")
+    # Seed two control profiles so per-profile history/labels are exercised.
     prof = ira / "profiles" / "controls" / "Baseline"; prof.mkdir(parents=True)
-    for name, src in REF_FILES.items():
-        if src.exists():
-            shutil.copy2(src, prof / name)
+    for profile in ("Baseline", "Oval"):
+        pdir = ira / "profiles" / "controls" / profile; pdir.mkdir(parents=True, exist_ok=True)
+        for name, src in REF_FILES.items():
+            if src.exists():
+                shutil.copy2(src, pdir / name)
     cfg_path = tmp / "config.toml"
     cfg_path.write_text(
         f'[paths]\niracing_dir = "{ira.as_posix()}"\n'

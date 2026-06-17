@@ -14,7 +14,8 @@ from datetime import datetime
 from pathlib import Path
 
 from irtracker import __version__, semdiff
-from irtracker.config import SIDECAR_NAME, Config, config_path, load_config, setup_logging
+from irtracker.config import (
+    SIDECAR_NAME, Config, config_path, is_sidecar, load_config, setup_logging)
 from irtracker.gfcc import codec
 from irtracker.gfcc.codec import GfccError
 from irtracker.gfcc.patch import apply_bindings, load_bindings, remap_device, remap_joycalib
@@ -44,7 +45,7 @@ def _fmt_date(iso: str) -> str:
 def _print_snapshot_line(s: Snapshot) -> None:
     label = TRIGGER_LABELS.get(s.meta.trigger, s.meta.trigger)
     print(f"{s.short}  {_fmt_date(s.author_date)}  {label:<28} {s.meta.context_label()}")
-    files = ", ".join(sorted(n for n in s.meta.files if n != SIDECAR_NAME)) or "-"
+    files = ", ".join(sorted(n for n in s.meta.files if not is_sidecar(n))) or "-"
     tag_str = f"  [{', '.join(s.tags)}]" if s.tags else ""
     print(f"          {files}{tag_str}")
     if s.meta.message:
@@ -156,7 +157,7 @@ def cmd_diff(args) -> int:
         names |= set(repo.files_at(rev_b))
     else:
         names |= set(cfg.tracked_files_present())
-    names.discard(SIDECAR_NAME)
+    names = {n for n in names if not is_sidecar(n)}
     if args.file:
         names &= {args.file}
         if not names:

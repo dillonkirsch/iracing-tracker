@@ -13,7 +13,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from irtracker.config import SIDECAR_NAME, Config
+from irtracker.config import (
+    CONTROLS_SUBDIR, SIDECAR_NAME, Config, active_control_profile, is_sidecar)
 from irtracker.gfcc import GfccError, codec
 from irtracker.repo import Snapshot, SnapshotMeta, SnapshotRepo, meta_for_export
 from irtracker import semdiff
@@ -79,6 +80,33 @@ class Tracker:
         import sys
         textconv = f'"{sys.executable}" -m irtracker decode --textconv'
         self.repo.init(textconv_cmd=textconv.replace("\\", "/"))
+        self._migrate_legacy_control_keys()
+
+    def _migrate_legacy_control_keys(self) -> None:
+        """One-time: relocate pre-profiles bare controls.cfg/joyCalib.yaml (and
+        the decoded sidecar) in the repo into the active profile folder, so the
+        existing history carries over when iRacing's control-profiles layout
+        takes effect (no scary 'deleted' entry). Idempotent and cheap to skip."""
+        if not (self.repo.dir / "controls.cfg").exists() \
+                and not (self.repo.dir / "joyCalib.yaml").exists():
+            return
+        profile = active_control_profile(self.cfg.iracing_dir)
+        if not profile:
+            return
+        dest = f"{CONTROLS_SUBDIR}/{profile}"
+        moved = False
+        for fname in ("controls.cfg", "joyCalib.yaml", SIDECAR_NAME):
+            old = self.repo.dir / fname
+            new = self.repo.dir / dest / fname
+            if old.exists() and not new.exists():
+                new.parent.mkdir(parents=True, exist_ok=True)
+                if self.repo.git("mv", fname, f"{dest}/{fname}", check=False).returncode == 0:
+                    moved = True
+        if moved:
+            self.repo.git("commit", "-m",
+                          f'iRacing moved your controls into the "{profile}" profile',
+                          check=False)
+            log.info("migrated legacy control files into profile %r", profile)
 
     # -- snapshotting ----------------------------------------------------------
 
@@ -108,6 +136,8 @@ class Tracker:
             return result
         result.files = changes
 
+        message = message or self._profile_switch_message(changes)
+
         meta = SnapshotMeta(
             trigger=trigger, files=changes, sim_running=sim_running,
             car=car, track=track, message=message,
@@ -122,12 +152,30 @@ class Tracker:
                  ", ".join(sorted(changes)), trigger, " [collapsed]" if amend else "")
         return result
 
+    def _profile_switch_message(self, changes: dict[str, str]) -> str | None:
+        """Friendly history label when this snapshot is (also) an active-profile
+        switch -- i.e. app.ini's [ControlProfiles] Global changed value."""
+        from irtracker.config import control_profile_in_text
+        if "app.ini" not in changes or self.repo.head() is None:
+            return None
+        if not self.repo.file_exists_at("HEAD", "app.ini"):
+            return None
+        try:
+            old_text = self.repo.show_file("HEAD", "app.ini").decode("utf-8", "replace")
+        except Exception:
+            return None
+        old = control_profile_in_text(old_text)
+        new = active_control_profile(self.cfg.iracing_dir)
+        if old and new and old != new:
+            return f"Switched active control profile: {old} → {new}"
+        return None
+
     def _candidates(self, names: set[str] | None) -> set[str]:
         if names is not None:
             return {n for n in names if self._effective_policy(n)}
         live = set(self.cfg.tracked_files_present())
         # Files in the repo but gone from the live folder are deletion candidates.
-        in_repo = {n for n in self.repo.tracked_in_worktree() if n != SIDECAR_NAME}
+        in_repo = {n for n in self.repo.tracked_in_worktree() if not is_sidecar(n)}
         return {n for n in live | in_repo if self._effective_policy(n)}
 
     def _effective_policy(self, name: str):
@@ -180,12 +228,14 @@ class Tracker:
         return kind
 
     def _refresh_sidecar(self, name: str, data: bytes | None) -> None:
-        """Regenerate controls.decoded.json whenever controls.cfg changes (M3).
-        If decoding fails, raw versioning continues and the decoded view is
-        marked unavailable for that version (FR-25)."""
-        if name.lower() != "controls.cfg":
+        """Regenerate controls.decoded.json next to each controls.cfg whenever it
+        changes (M3) -- one sidecar per profile. If decoding fails, raw
+        versioning continues and the decoded view is marked unavailable for that
+        version (FR-25)."""
+        from pathlib import PurePosixPath
+        if PurePosixPath(name.replace("\\", "/")).name.lower() != "controls.cfg":
             return
-        sidecar = self.repo.dir / SIDECAR_NAME
+        sidecar = (self.repo.dir / name).parent / SIDECAR_NAME
         if data is None:
             if sidecar.exists():
                 sidecar.unlink()
@@ -204,7 +254,7 @@ class Tracker:
     def _should_collapse(self, changes: dict[str, str]) -> bool:
         """Amend instead of stacking commits when this change and the previous
         snapshot both touch only track-collapsed files with the same file set."""
-        config_files = [n for n in changes if n != SIDECAR_NAME]
+        config_files = [n for n in changes if not is_sidecar(n)]
         if not config_files:
             return False
         for name in config_files:
@@ -215,7 +265,7 @@ class Tracker:
         if head is None or self.repo.commit_is_tagged(head):
             return False
         prev = self.repo.snapshot_at("HEAD")
-        prev_files = {n for n in prev.meta.files if n != SIDECAR_NAME}
+        prev_files = {n for n in prev.meta.files if not is_sidecar(n)}
         if prev_files != set(config_files):
             return False
         # Never collapse the repo's very first commit away.
@@ -229,11 +279,13 @@ class Tracker:
         """Restore one file to a version: byte-exact blob copy (FR-15/19)."""
         if sim_is_running:
             raise SimRunningError("restore is blocked while the sim is running (FR-18)")
-        if name == SIDECAR_NAME:
+        if is_sidecar(name):
             raise ValueError(f"{SIDECAR_NAME} is derived from controls.cfg; restore controls.cfg instead")
         data = self.repo.show_file(rev, name)
         self.take_snapshot("pre_restore", message=f"auto-snapshot before restoring {name} to {rev}")
-        self.cfg.live_path(name).write_bytes(data)
+        dest = self.cfg.live_path(name)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
         commit = self.take_snapshot(
             "restore", names={name},
             message=f"restored {name} to {self.repo.resolve(rev)[:8]}").commit
@@ -245,14 +297,16 @@ class Tracker:
         from the baseline are reported, not deleted."""
         if sim_is_running:
             raise SimRunningError("restore is blocked while the sim is running (FR-18)")
-        files = [n for n in self.repo.files_at(tag) if n != SIDECAR_NAME]
+        files = [n for n in self.repo.files_at(tag) if not is_sidecar(n)]
         if not files:
             raise ValueError(f"no files recorded at {tag!r}")
         self.take_snapshot("pre_restore", message=f"auto-snapshot before restoring baseline {tag}")
         restored: list[str] = []
         for name in files:
             data = self.repo.show_file(tag, name)
-            self.cfg.live_path(name).write_bytes(data)
+            dest = self.cfg.live_path(name)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data)
             restored.append(name)
         extras = [n for n in self.cfg.tracked_files_present() if n not in files]
         self.take_snapshot("restore", message=f"restored baseline {tag}")
