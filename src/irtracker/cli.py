@@ -168,7 +168,7 @@ def cmd_diff(args) -> int:
         if rev_b:
             new = repo.show_file(rev_b, name) if repo.file_exists_at(rev_b, name) else None
         else:
-            live = cfg.iracing_dir / name
+            live = cfg.live_path(name)
             new = live.read_bytes() if live.exists() else None
         if old == new:
             continue
@@ -359,7 +359,7 @@ def cmd_encode(args) -> int:
         if sim_running(cfg.sim_processes):
             return _fail("install is blocked while the sim is running (FR-24)")
         backup = backup_live_file(cfg, "controls.cfg")
-        target = cfg.iracing_dir / "controls.cfg"
+        target = cfg.live_path("controls.cfg")
         target.write_bytes(out_bytes)
         print(f"installed to {target}")
         if backup:
@@ -376,7 +376,7 @@ def cmd_remap(args) -> int:
     base_path = Path(args.base) if args.base else None
     if base_path is None:
         cfg = _load(args)
-        base_path = cfg.iracing_dir / "controls.cfg"
+        base_path = cfg.live_path("controls.cfg")
     try:
         base = base_path.read_bytes()
     except OSError as exc:
@@ -425,13 +425,13 @@ def cmd_remap(args) -> int:
         cfg = cfg or _load(args)
         if sim_running(cfg.sim_processes):
             return _fail("install is blocked while the sim is running (FR-24)")
-        target = cfg.iracing_dir / "controls.cfg"
+        target = cfg.live_path("controls.cfg")
         backup = backup_live_file(cfg, "controls.cfg")
         target.write_bytes(out_bytes)
         print(f"installed to {target}")
         if backup:
             print(f"previous file backed up to {backup}")
-        jc = cfg.iracing_dir / "joyCalib.yaml"
+        jc = cfg.live_path("joyCalib.yaml")
         if jc.exists():
             text = jc.read_text(encoding="utf-8", errors="replace")
             new_text, n = remap_joycalib(text, old, new)
@@ -449,7 +449,7 @@ def cmd_whatis(args) -> int:
     base_path = Path(args.base) if args.base else None
     if base_path is None:
         cfg = _load(args)
-        base_path = cfg.iracing_dir / "controls.cfg"
+        base_path = cfg.live_path("controls.cfg")
     try:
         data = base_path.read_bytes()
     except OSError as exc:
@@ -482,7 +482,7 @@ def cmd_devices(args) -> int:
     if base_path is None:
         try:
             cfg = _load(args)
-            candidate = cfg.iracing_dir / "controls.cfg"
+            candidate = cfg.live_path("controls.cfg")
             base_path = candidate if candidate.exists() else None
         except SystemExit:
             base_path = None
@@ -492,7 +492,7 @@ def cmd_devices(args) -> int:
         except (OSError, GfccError) as exc:
             print(f"note: could not decode {base_path}: {exc}", file=sys.stderr)
     if cfg:
-        jc = cfg.iracing_dir / "joyCalib.yaml"
+        jc = cfg.live_path("joyCalib.yaml")
         if jc.exists():
             joycalib = jc.read_text(encoding="utf-8", errors="replace")
 

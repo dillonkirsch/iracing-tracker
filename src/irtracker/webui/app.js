@@ -654,16 +654,19 @@ function savedStateBanner(c) {
       <span class="muted">${icon("clock")} Viewing a saved backup (${esc(c.source)}), not your live controls.</span></div>`;
   }
   const when = c.lastSaved ? fmtDate(c.lastSaved) : "an unknown time";
+  const prof = c.profile
+    ? `<span class="muted" style="font-size:12px">${icon("bookmark")} Active iRacing control profile: <strong>${esc(c.profile)}</strong></span><br>`
+    : "";
   // iRacing buffers binding changes and only writes controls.cfg when the sim
   // fully exits, so while it's running the file (and this view) can lag.
   if (c.simRunning) {
     return `<div class="card conflict-banner" style="margin-bottom:16px;padding:13px 15px">
       <p class="section-label mt-0" style="color:var(--warn);margin-bottom:6px">${icon("alert")} iRacing is running — recent changes may not be saved yet</p>
-      <p class="muted mt-0" style="font-size:12.5px;line-height:1.5">This shows what iRacing last <strong>saved</strong> to your controls file (${esc(when)}). iRacing keeps new key &amp; button changes in memory and only writes them to the file when you <strong>fully exit the sim to the desktop</strong>. If you rebound something and don't see it here, close iRacing completely, then click Refresh.</p>
+      <p class="muted mt-0" style="font-size:12.5px;line-height:1.5">${prof}This shows what iRacing last <strong>saved</strong> to your controls file (${esc(when)}). iRacing keeps new key &amp; button changes in memory and only writes them to the file when you <strong>fully exit the sim to the desktop</strong>. If you rebound something and don't see it here, close iRacing completely, then click Refresh.</p>
     </div>`;
   }
   return `<div class="card" style="padding:11px 14px;margin-bottom:16px;font-size:12px">
-    <span class="muted">${icon("clock")} Showing iRacing's last saved controls — updated ${esc(when)}. After you rebind in iRacing, exit the sim so it saves the file, then click Refresh.</span></div>`;
+    <span class="muted">${prof}${icon("clock")} Showing iRacing's last saved controls — updated ${esc(when)}. After you rebind in iRacing, exit the sim so it saves the file, then click Refresh.</span></div>`;
 }
 
 function conflictBanner(conflicts) {

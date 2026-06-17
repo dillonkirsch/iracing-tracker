@@ -185,7 +185,14 @@ class Watcher:
         from watchdog.observers import Observer
 
         observer = Observer()
-        observer.schedule(self._make_handler(), str(self.cfg.iracing_dir), recursive=False)
+        handler = self._make_handler()
+        observer.schedule(handler, str(self.cfg.iracing_dir), recursive=False)
+        # iRacing's control profiles store controls.cfg/joyCalib.yaml in a
+        # subfolder; watch it (recursively, to cover every profile) so rebinds
+        # are caught as events, not only by the periodic rescan.
+        profiles = self.cfg.iracing_dir / "profiles" / "controls"
+        if profiles.is_dir():
+            observer.schedule(handler, str(profiles), recursive=True)
         observer.start()
         log.info("watching %s (debounce %.0fs, sim poll %.0fs)",
                  self.cfg.iracing_dir, self.cfg.debounce_seconds, self.cfg.sim_poll_seconds)

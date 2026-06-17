@@ -28,7 +28,8 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
-from irtracker.config import SIDECAR_NAME, Config, config_path, load_config
+from irtracker.config import (
+    SIDECAR_NAME, Config, active_control_profile, config_path, load_config)
 from irtracker.gfcc import codec
 from irtracker.gfcc.codec import GfccError
 from irtracker.gfcc.patch import remap_device, remap_joycalib
@@ -270,7 +271,7 @@ class GuiApi:
         files = []
         for name in sorted(names):
             old = repo.show_file("HEAD", name) if repo.file_exists_at("HEAD", name) else None
-            live = cfg.iracing_dir / name
+            live = cfg.live_path(name)
             new = live.read_bytes() if live.exists() else None
             if old == new:
                 continue
@@ -297,7 +298,7 @@ class GuiApi:
         for name in sorted(names):
             old = repo.show_file(rev_a, name) if repo.file_exists_at(rev_a, name) else None
             if live:
-                p = cfg.iracing_dir / name
+                p = cfg.live_path(name)
                 new = p.read_bytes() if p.exists() else None
             else:
                 new = repo.show_file(rev_b, name) if repo.file_exists_at(rev_b, name) else None
@@ -542,7 +543,7 @@ class GuiApi:
                 data = Tracker(cfg).repo.show_file(rev, "controls.cfg")
                 source = rev[:8]
             else:
-                path = cfg.iracing_dir / "controls.cfg"
+                path = cfg.live_path("controls.cfg")
                 if not path.exists():
                     return _ok(available=False,
                                error="No controls.cfg found in your iRacing folder yet.")
@@ -569,6 +570,7 @@ class GuiApi:
             bindings=bindings,
             conflicts=conflicts,
             lastSaved=last_saved,
+            profile=(active_control_profile(cfg.iracing_dir) if is_live else None),
             simRunning=(is_live and sim_running(cfg.sim_processes)),
             boundCount=sum(1 for b in bindings if b["kind"] != "unbound"),
             ffbNote="Force-feedback strength and pedal calibration are stored in "
@@ -627,7 +629,7 @@ class GuiApi:
         cfg = self._config()
         if cfg is None:
             return _err(self._cfg_error or "could not load configuration")
-        controls = cfg.iracing_dir / "controls.cfg"
+        controls = cfg.live_path("controls.cfg")
         if not controls.exists():
             return _err("No controls.cfg found in your iRacing folder.")
         try:
@@ -645,14 +647,14 @@ class GuiApi:
         from irtracker.gfcc.devices import build_report
 
         base_doc = None
-        controls = cfg.iracing_dir / "controls.cfg"
+        controls = cfg.live_path("controls.cfg")
         if controls.exists():
             try:
                 base_doc = codec.decode_bytes(controls.read_bytes())
             except (OSError, GfccError):
                 base_doc = None
         joycalib = None
-        jc = cfg.iracing_dir / "joyCalib.yaml"
+        jc = cfg.live_path("joyCalib.yaml")
         if jc.exists():
             joycalib = jc.read_text(encoding="utf-8", errors="replace")
 
@@ -698,7 +700,7 @@ class GuiApi:
         if sim_running(cfg.sim_processes):
             return _err("Can't change your controls while iRacing is running. Close "
                         "the sim (and the iRacing UI) first, then try again.", simBlocked=True)
-        controls = cfg.iracing_dir / "controls.cfg"
+        controls = cfg.live_path("controls.cfg")
         if not controls.exists():
             return _err("No controls.cfg found in your iRacing folder.")
         try:
@@ -715,7 +717,7 @@ class GuiApi:
             backup_live_file(cfg, "controls.cfg")
             controls.write_bytes(out)
             jc_count = 0
-            jc = cfg.iracing_dir / "joyCalib.yaml"
+            jc = cfg.live_path("joyCalib.yaml")
             if jc.exists():
                 new_text, jc_count = remap_joycalib(
                     jc.read_text(encoding="utf-8", errors="replace"), old_instance, new_instance)

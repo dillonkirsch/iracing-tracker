@@ -140,7 +140,7 @@ class Tracker:
         tp = self._effective_policy(name)
         if tp is None:
             return None
-        live = self.cfg.iracing_dir / name
+        live = self.cfg.live_path(name)
         mirror = self.repo.dir / name
 
         if not live.exists():
@@ -233,7 +233,7 @@ class Tracker:
             raise ValueError(f"{SIDECAR_NAME} is derived from controls.cfg; restore controls.cfg instead")
         data = self.repo.show_file(rev, name)
         self.take_snapshot("pre_restore", message=f"auto-snapshot before restoring {name} to {rev}")
-        (self.cfg.iracing_dir / name).write_bytes(data)
+        self.cfg.live_path(name).write_bytes(data)
         commit = self.take_snapshot(
             "restore", names={name},
             message=f"restored {name} to {self.repo.resolve(rev)[:8]}").commit
@@ -252,7 +252,7 @@ class Tracker:
         restored: list[str] = []
         for name in files:
             data = self.repo.show_file(tag, name)
-            (self.cfg.iracing_dir / name).write_bytes(data)
+            self.cfg.live_path(name).write_bytes(data)
             restored.append(name)
         extras = [n for n in self.cfg.tracked_files_present() if n not in files]
         self.take_snapshot("restore", message=f"restored baseline {tag}")
@@ -300,7 +300,7 @@ class Tracker:
         if not self.repo.initialized:
             return {n: "added" for n in self.cfg.tracked_files_present()}
         for name in sorted(self._candidates(None)):
-            live = self.cfg.iracing_dir / name
+            live = self.cfg.live_path(name)
             mirror = self.repo.dir / name
             if not live.exists():
                 if mirror.exists():
@@ -320,7 +320,7 @@ class Tracker:
 
 def backup_live_file(cfg: Config, name: str) -> Path | None:
     """Timestamped copy of a live file into data_dir\\backups (encode --install)."""
-    src = cfg.iracing_dir / name
+    src = cfg.live_path(name)
     if not src.exists():
         return None
     backups = cfg.data_dir / "backups"

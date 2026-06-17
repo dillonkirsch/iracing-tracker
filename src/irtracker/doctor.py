@@ -66,7 +66,7 @@ def run_checks(cfg: Config) -> list[Check]:
     unreadable = []
     for name in present:
         try:
-            (cfg.iracing_dir / name).read_bytes()
+            cfg.live_path(name).read_bytes()
         except OSError:
             unreadable.append(name)
     if not present:
@@ -76,7 +76,7 @@ def run_checks(cfg: Config) -> list[Check]:
     else:
         add(Check("Tracked files", OK, f"{len(present)} file(s) present and readable"))
 
-    controls = cfg.iracing_dir / "controls.cfg"
+    controls = cfg.live_path("controls.cfg")
     if controls.exists():
         try:
             codec.decode_bytes(controls.read_bytes())

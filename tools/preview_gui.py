@@ -33,9 +33,13 @@ def _populate() -> str:
     tmp = Path(tempfile.mkdtemp(prefix="irtrack-preview-"))
     ira = tmp / "iRacing"; ira.mkdir()
     data = tmp / "data"; data.mkdir()
+    # Mirror iRacing's control-profiles layout: controls.cfg/joyCalib.yaml live in
+    # a profile subfolder named by app.ini's [ControlProfiles] Global key.
+    (ira / "app.ini").write_text("[ControlProfiles]\nGlobal=Baseline\n", encoding="utf-8")
+    prof = ira / "profiles" / "controls" / "Baseline"; prof.mkdir(parents=True)
     for name, src in REF_FILES.items():
         if src.exists():
-            shutil.copy2(src, ira / name)
+            shutil.copy2(src, prof / name)
     cfg_path = tmp / "config.toml"
     cfg_path.write_text(
         f'[paths]\niracing_dir = "{ira.as_posix()}"\n'
@@ -45,7 +49,7 @@ def _populate() -> str:
     api = GuiApi(str(cfg_path))
     api.backup_now("known-good baseline")
     # a second backup with a small edit so history + diffs have content
-    jc = ira / "joyCalib.yaml"
+    jc = prof / "joyCalib.yaml"
     if jc.exists():
         text = jc.read_text(encoding="utf-8", errors="replace")
         new = re.sub(r"(CalibCenter:\s*)(\d+)", lambda m: f"{m.group(1)}{int(m.group(2)) + 1}",

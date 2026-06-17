@@ -26,6 +26,35 @@ SIDECAR_NAME = "controls.decoded.json"
 
 DEFAULT_SIM_PROCESSES = ["iRacingSim64DX11.exe", "iRacingSimAV2DX11.exe", "iRacingUI.exe"]
 
+# iRacing's "control profiles" feature (rolled out 2025) moved the live controls
+# out of the top-level folder and into profiles\controls\<name>\. The active
+# profile is named in app.ini's [ControlProfiles] Global key. These two files
+# follow the profile; everything else stays at the top of iracing_dir. Legacy
+# installs (no profiles feature) keep them top-level, so resolution falls back.
+PROFILE_RELATIVE_FILES = {"controls.cfg", "joycalib.yaml"}  # matched lowercase
+
+
+def active_control_profile(iracing_dir: Path) -> str | None:
+    """Active control-profile name from app.ini's [ControlProfiles] Global key,
+    or None on legacy installs that keep controls.cfg at the top level."""
+    try:
+        text = (iracing_dir / "app.ini").read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return None
+    section: str | None = None
+    for raw in text.splitlines():
+        line = raw.split(";", 1)[0].strip()  # iRacing .ini uses ';' inline comments
+        if not line:
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1].strip().lower()
+            continue
+        if section == "controlprofiles" and "=" in line:
+            key, _, val = line.partition("=")
+            if key.strip().lower() == "global":
+                return val.strip() or None
+    return None
+
 DEFAULT_CONFIG_TOML = """\
 # iRacing Config Tracker configuration.
 # Relative patterns are resolved against iracing_dir.
@@ -127,6 +156,19 @@ class Config:
     def state_dir(self) -> Path:
         return self.data_dir / "state"
 
+    def live_path(self, name: str) -> Path:
+        """On-disk path of a tracked file. controls.cfg / joyCalib.yaml follow the
+        active control profile (iRacing's profiles feature); every other file
+        lives at the top of iracing_dir. Falls back to the top level when no
+        profile is active or the profile folder is missing."""
+        if name.lower() in PROFILE_RELATIVE_FILES:
+            profile = active_control_profile(self.iracing_dir)
+            if profile:
+                pdir = self.iracing_dir / "profiles" / "controls" / profile
+                if pdir.is_dir():
+                    return pdir / name
+        return self.iracing_dir / name
+
     def policy_for(self, name: str) -> TrackedPattern | None:
         """Match a live-folder filename against tracked patterns (first match wins)."""
         from fnmatch import fnmatch
@@ -139,16 +181,27 @@ class Config:
         return None
 
     def tracked_files_present(self) -> list[str]:
-        """Names of files in the live folder matching a non-ignore pattern."""
+        """Names of tracked (non-ignore) files present in the live folder.
+
+        Files relocated into a control-profile subfolder are included by their
+        logical name even though the top-level copy may be stale or absent."""
         names: list[str] = []
         if not self.iracing_dir.is_dir():
             return names
+        seen: set[str] = set()
         for entry in sorted(self.iracing_dir.iterdir()):
             if not entry.is_file():
                 continue
             tp = self.policy_for(entry.name)
             if tp and tp.policy != "ignore":
                 names.append(entry.name)
+                seen.add(entry.name.lower())
+        for name in ("controls.cfg", "joyCalib.yaml"):
+            if name.lower() in seen:
+                continue
+            tp = self.policy_for(name)
+            if tp and tp.policy != "ignore" and self.live_path(name).exists():
+                names.append(name)
         return names
 
 
