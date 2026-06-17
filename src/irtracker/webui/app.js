@@ -226,6 +226,7 @@ const state = {
   controls: null,
   devices: null,
   controlsFilter: "",
+  controlsProfile: null,  // which iRacing control profile the Controls view shows
   showUnbound: false,
 };
 
@@ -560,9 +561,11 @@ async function renderControls() {
   content.innerHTML = `<div class="loading">Reading your controls…</div>`;
   // Always re-read the live controls.cfg: it changes outside the app (you rebind
   // in iRacing), so a cached copy would show stale bindings/conflicts.
-  state.controls = await api("get_controls");
-  state.devices = await api("get_devices");
+  state.controls = await api("get_controls", null, state.controlsProfile);
   const c = state.controls;
+  // Sync the selection to whatever profile the backend actually showed.
+  state.controlsProfile = (c && c.profile) || null;
+  state.devices = await api("get_devices", state.controlsProfile);
 
   if (!c.ok || !c.available) {
     content.innerHTML = `
@@ -573,10 +576,17 @@ async function renderControls() {
     return;
   }
 
+  // A picker appears once iRacing has more than one control profile, so you can
+  // browse any profile's bindings here without switching the active one in-sim.
+  const profileSelect = (c.profiles && c.profiles.length > 1)
+    ? `<select class="search" id="ctlProfile" style="max-width:200px;margin:0" title="View a control profile">
+        ${c.profiles.map((p) => `<option value="${esc(p)}"${p === c.profile ? " selected" : ""}>${esc(p)}${p === c.activeProfile ? " (active)" : ""}</option>`).join("")}
+      </select>` : "";
   content.innerHTML = `
     <div class="page-head spread"><div><h1 class="page-title">Controls &amp; Devices</h1>
       <p class="page-sub">How your wheel, pedals, and keyboard are mapped in iRacing. This view is read-only.</p></div>
-      <button class="btn btn-sm" data-action="refresh-controls">${icon("rotate")} Refresh</button></div>
+      <div class="row-gap">${profileSelect}
+        <button class="btn btn-sm" data-action="refresh-controls">${icon("rotate")} Refresh</button></div></div>
     ${savedStateBanner(c)}
     <div class="card" style="padding:14px;margin-bottom:16px;display:flex;gap:12px;align-items:flex-start">
       ${icon("alert", "ico")}
@@ -605,6 +615,7 @@ async function renderControls() {
 
   $("#ctlSearch").addEventListener("input", (e) => { state.controlsFilter = e.target.value; renderCtlRows(); });
   $("#showUnbound").addEventListener("change", (e) => { state.showUnbound = e.target.checked; renderCtlRows(); });
+  if ($("#ctlProfile")) $("#ctlProfile").addEventListener("change", (e) => { state.controlsProfile = e.target.value; renderControls(); });
   const cap = $("#keycap");
   cap.addEventListener("keydown", (ev) => { ev.preventDefault(); const q = eventToQuery(ev); if (q) doIdentify(q); });
   cap.addEventListener("focus", () => { cap.textContent = "Press any key…"; });
@@ -649,7 +660,7 @@ function eventToQuery(ev) {
 async function doIdentify(query) {
   const out = $("#identifyResult");
   if (!out || !query || !String(query).trim()) return;
-  const r = await api("identify_input", String(query).trim());
+  const r = await api("identify_input", String(query).trim(), state.controlsProfile);
   if (!r.ok) { out.innerHTML = `<p class="muted" style="margin-top:10px">${esc(r.error)}</p>`; return; }
   if (r.free) {
     out.innerHTML = `<div style="margin-top:12px"><span class="bind ${r.kind}">${esc(r.label)}</span>
@@ -667,9 +678,11 @@ function savedStateBanner(c) {
       <span class="muted">${icon("clock")} Viewing a saved backup (${esc(c.source)}), not your live controls.</span></div>`;
   }
   const when = c.lastSaved ? fmtDate(c.lastSaved) : "an unknown time";
-  const prof = c.profile
-    ? `<span class="muted" style="font-size:12px">${icon("bookmark")} Active iRacing control profile: <strong>${esc(c.profile)}</strong></span><br>`
-    : "";
+  const isActive = !c.profile || c.profile === c.activeProfile;
+  const prof = !c.profile ? ""
+    : isActive
+      ? `<span class="muted" style="font-size:12px">${icon("bookmark")} Active iRacing control profile: <strong>${esc(c.profile)}</strong></span><br>`
+      : `<span style="font-size:12px;color:var(--warn)">${icon("bookmark")} Viewing the <strong>${esc(c.profile)}</strong> profile — not the one active in iRacing (active: <strong>${esc(c.activeProfile || "—")}</strong>)</span><br>`;
   // iRacing buffers binding changes and only writes controls.cfg when the sim
   // fully exits, so while it's running the file (and this view) can lag.
   if (c.simRunning) {
@@ -757,13 +770,13 @@ function renderDevicesAside() {
 async function renderProfiles() {
   const content = $("#content");
   $("#aside").innerHTML = "";
-  content.innerHTML = `<div class="loading">Loading profiles…</div>`;
+  content.innerHTML = `<div class="loading">Loading saved setups…</div>`;
   const r = await api("list_profiles");
   const items = r.ok ? r.items : [];
   content.innerHTML = `
     <div class="page-head spread">
-      <div><h1 class="page-title">Profiles</h1>
-        <p class="page-sub">Named setups you can switch between in one click — e.g. “Oval”, “Road”, “VR”.</p></div>
+      <div><h1 class="page-title">Saved Setups</h1>
+        <p class="page-sub">Snapshots of your whole iRacing config you can restore in one click — e.g. “Oval”, “Road”, “VR”. (This is the app’s own backup feature — separate from iRacing’s built-in control profiles.)</p></div>
       <button class="btn btn-primary" data-action="save-profile">${icon("bookmark")} Save current setup…</button>
     </div>
     ${items.length ? items.map(profileCard).join("") : profilesEmpty()}`;
@@ -771,9 +784,9 @@ async function renderProfiles() {
 
 function profilesEmpty() {
   return `<div class="empty">${icon("bookmark")}
-    <h3>No profiles yet</h3>
-    <p>Save your current iRacing setup as a named profile, then switch to it any time with one click — great for swapping between disciplines or rigs (oval vs road, VR vs triple-screen).</p>
-    <div style="margin-top:18px"><button class="btn btn-primary" data-action="save-profile">Save current setup as a profile…</button></div>
+    <h3>No saved setups yet</h3>
+    <p>Save your current iRacing config under a name, then restore it any time with one click — great for swapping between disciplines or rigs (oval vs road, VR vs triple-screen).</p>
+    <div style="margin-top:18px"><button class="btn btn-primary" data-action="save-profile">Save current setup…</button></div>
   </div>`;
 }
 
@@ -787,7 +800,7 @@ function profileCard(p) {
         <div class="muted" style="font-size:12.5px;margin-top:3px">${esc(when)}${esc(ctx)}</div>
       </div>
       <div class="row-gap">
-        <button class="btn btn-sm btn-primary" data-action="apply-profile" data-name="${esc(p.name)}">${icon("rotate")} Apply</button>
+        <button class="btn btn-sm btn-primary" data-action="apply-profile" data-name="${esc(p.name)}">${icon("rotate")} Restore</button>
         <button class="btn btn-sm btn-danger" data-action="delete-profile" data-name="${esc(p.name)}">Delete</button>
       </div>
     </div>
@@ -797,9 +810,9 @@ function profileCard(p) {
 
 async function doSaveProfile() {
   const name = await promptModal({
-    title: "Save current setup as a profile",
-    body: "Name it something memorable like “Oval”, “Road”, or “VR”. You can switch back to it any time.",
-    placeholder: "e.g. Road setup", confirmLabel: "Save profile",
+    title: "Save current setup",
+    body: "Name it something memorable like “Oval”, “Road”, or “VR”. You can restore it any time.",
+    placeholder: "e.g. Road setup", confirmLabel: "Save setup",
   });
   if (!name) return;
   const r = await api("save_current_as_profile", name);
@@ -809,9 +822,9 @@ async function doSaveProfile() {
 
 async function doApplyProfile(name) {
   const ok = await confirmModal({
-    title: `Apply profile “${esc(name)}”?`,
-    body: `This sets your live iRacing files back to the <b>${esc(name)}</b> profile. A safety backup of your current setup is made first, so it's reversible.`,
-    confirmLabel: "Apply", danger: false,
+    title: `Restore saved setup “${esc(name)}”?`,
+    body: `This sets your live iRacing files back to the <b>${esc(name)}</b> saved setup. A safety backup of your current setup is made first, so it's reversible.`,
+    confirmLabel: "Restore", danger: false,
   });
   if (!ok) return;
   const r = await api("restore_baseline", name);
@@ -821,8 +834,8 @@ async function doApplyProfile(name) {
 
 async function doDeleteProfile(name) {
   const ok = await confirmModal({
-    title: `Delete profile “${esc(name)}”?`,
-    body: "This removes the saved profile only. Your backups and live files are left untouched.",
+    title: `Delete saved setup “${esc(name)}”?`,
+    body: "This removes the saved setup only. Your backups and live files are left untouched.",
     confirmLabel: "Delete", danger: true,
   });
   if (!ok) return;
@@ -1125,7 +1138,7 @@ function renderWizard() {
   } else {
     body = `<img class="wizard-logo" src="${logoUri()}" alt="">
       <h2>You're all set! 🎉</h2>
-      <p class="lead">Your settings are protected. Open <b>Backup History</b> any time to see saved versions or restore one, or <b>Profiles</b> to switch between setups.</p>`;
+      <p class="lead">Your settings are protected. Open <b>Backup History</b> any time to see saved versions or restore one, or <b>Saved Setups</b> to switch between whole configs.</p>`;
     actions = `<button class="btn btn-primary" data-action="wiz-done" style="margin:0 auto">Open the app</button>`;
   }
 

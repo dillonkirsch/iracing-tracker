@@ -478,24 +478,24 @@ class GuiApi:
         raw = (name or "").strip()
         slug = _tag_slug(raw)
         if not slug:
-            return _err("Please use letters or numbers for the profile name.")
+            return _err("Please use letters or numbers for the setup name.")
         if slug in {t[0] for t in tracker.repo.list_tags()}:
-            return _err(f"A profile named \"{slug}\" already exists.")
+            return _err(f"A saved setup named \"{slug}\" already exists.")
         running = sim_running(tracker.cfg.sim_processes)
         car = track = None
         if running:
             ctx = ContextCache(tracker.cfg.state_dir).context
             car, track = ctx.car, ctx.track
-        result = tracker.take_snapshot("manual", message=f'profile "{raw}"',
+        result = tracker.take_snapshot("manual", message=f'saved setup "{raw}"',
                                        sim_running=running, car=car, track=track)
         rev = result.commit or tracker.repo.head()
         if not rev:
             return _err("There's nothing to save yet — your iRacing folder looks empty.")
         try:
-            tracker.repo.create_tag(slug, rev, f'profile "{raw}"')
+            tracker.repo.create_tag(slug, rev, f'saved setup "{raw}"')
         except Exception as exc:
             return _err(str(exc))
-        return _ok(message=f'Saved your current setup as profile "{slug}".')
+        return _ok(message=f'Saved your current setup as "{slug}".')
 
     def apply_profile(self, name: str) -> dict:
         """Apply a saved profile to the live folder (= restore that baseline)."""
@@ -532,20 +532,33 @@ class GuiApi:
 
     # -- controls & devices ------------------------------------------------------
 
-    def get_controls(self, rev: str | None = None) -> dict:
+    @staticmethod
+    def _profile_file(cfg, name: str, profile: str | None) -> Path:
+        """On-disk path of controls.cfg/joyCalib.yaml for a specific control
+        profile, or the active/legacy location when profile is None."""
+        if profile:
+            return cfg.iracing_dir / "profiles" / "controls" / profile / name
+        return cfg.live_path(name)
+
+    def get_controls(self, rev: str | None = None, profile: str | None = None) -> dict:
         cfg = self._config()
         if cfg is None:
             return _err(self._cfg_error or "could not load configuration")
         last_saved = None
         is_live = not rev
+        active = active_control_profile(cfg.iracing_dir)
+        profiles = cfg.control_profile_names()
+        # Which profile's controls to show (live only; default = the active one).
+        view = (profile if profile in profiles else active) if is_live else None
+        meta = dict(profiles=profiles, profile=view, activeProfile=active)
         try:
             if rev:
                 data = Tracker(cfg).repo.show_file(rev, "controls.cfg")
                 source = rev[:8]
             else:
-                path = cfg.live_path("controls.cfg")
+                path = self._profile_file(cfg, "controls.cfg", view)
                 if not path.exists():
-                    return _ok(available=False,
+                    return _ok(available=False, **meta,
                                error="No controls.cfg found in your iRacing folder yet.")
                 data = path.read_bytes()
                 source = "live"
@@ -557,7 +570,7 @@ class GuiApi:
         try:
             doc = codec.decode_bytes(data)
         except GfccError as exc:
-            return _ok(available=False, source=source,
+            return _ok(available=False, source=source, **meta,
                        error=f"This controls file couldn't be read in detail ({exc}). "
                              f"Your backups still keep it safely.")
         from irtracker.gfcc.analyze import find_binding_conflicts
@@ -566,11 +579,10 @@ class GuiApi:
         conflicts = [{"kind": c.kind, "label": c.label, "actions": c.actions}
                      for c in find_binding_conflicts(doc)]
         return _ok(
-            available=True, source=source,
+            available=True, source=source, **meta,
             bindings=bindings,
             conflicts=conflicts,
             lastSaved=last_saved,
-            profile=(active_control_profile(cfg.iracing_dir) if is_live else None),
             simRunning=(is_live and sim_running(cfg.sim_processes)),
             boundCount=sum(1 for b in bindings if b["kind"] != "unbound"),
             ffbNote="Force-feedback strength and pedal calibration are stored in "
@@ -624,12 +636,14 @@ class GuiApi:
             })
         return out
 
-    def identify_input(self, query: str) -> dict:
+    def identify_input(self, query: str, profile: str | None = None) -> dict:
         """Reverse lookup: what action(s) a key/button/axis is bound to."""
         cfg = self._config()
         if cfg is None:
             return _err(self._cfg_error or "could not load configuration")
-        controls = cfg.live_path("controls.cfg")
+        view = profile if profile in cfg.control_profile_names() \
+            else active_control_profile(cfg.iracing_dir)
+        controls = self._profile_file(cfg, "controls.cfg", view)
         if not controls.exists():
             return _err("No controls.cfg found in your iRacing folder.")
         try:
@@ -640,21 +654,23 @@ class GuiApi:
             return _err(str(exc))
         return _ok(query=query, label=label, kind=kind, matches=matches, free=not matches)
 
-    def get_devices(self) -> dict:
+    def get_devices(self, profile: str | None = None) -> dict:
         cfg = self._config()
         if cfg is None:
             return _err(self._cfg_error or "could not load configuration")
         from irtracker.gfcc.devices import build_report
 
+        view = profile if profile in cfg.control_profile_names() \
+            else active_control_profile(cfg.iracing_dir)
         base_doc = None
-        controls = cfg.live_path("controls.cfg")
+        controls = self._profile_file(cfg, "controls.cfg", view)
         if controls.exists():
             try:
                 base_doc = codec.decode_bytes(controls.read_bytes())
             except (OSError, GfccError):
                 base_doc = None
         joycalib = None
-        jc = cfg.live_path("joyCalib.yaml")
+        jc = self._profile_file(cfg, "joyCalib.yaml", view)
         if jc.exists():
             joycalib = jc.read_text(encoding="utf-8", errors="replace")
 

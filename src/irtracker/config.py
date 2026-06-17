@@ -206,6 +206,14 @@ class Config:
     def control_profiles_dir(self) -> Path:
         return self.iracing_dir / "profiles" / "controls"
 
+    def control_profile_names(self) -> list[str]:
+        """Names of every control profile present (subfolders of
+        profiles/controls), sorted; empty on legacy installs."""
+        pdir = self.control_profiles_dir()
+        if not pdir.is_dir():
+            return []
+        return sorted(p.name for p in pdir.iterdir() if p.is_dir())
+
     def control_profile_files(self) -> list[str]:
         """Profile-relative keys for every control profile's tracked files,
         e.g. ``profiles/controls/Oval/controls.cfg``."""

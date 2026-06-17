@@ -112,6 +112,31 @@ def test_active_profile_switch_is_labelled(cfg, corpus_cfg_bytes):
         "Switched active control profile: Oval → Road"
 
 
+def test_gui_controls_profile_selection(tmp_path, corpus_cfg_bytes):
+    from irtracker.gui import GuiApi
+    ira = tmp_path / "iRacing"; ira.mkdir()
+    (ira / "app.ini").write_text("[ControlProfiles]\nGlobal=Baseline\n", encoding="utf-8")
+    for p in ("Baseline", "Oval"):
+        d = ira / "profiles" / "controls" / p; d.mkdir(parents=True)
+        (d / "controls.cfg").write_bytes(corpus_cfg_bytes)
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(
+        f'[paths]\niracing_dir = "{ira.as_posix()}"\n'
+        f'data_dir = "{(tmp_path / "data").as_posix()}"\n', encoding="utf-8")
+
+    api = GuiApi(str(cfg_path))
+    r = api.get_controls()
+    assert r["ok"] and r["available"]
+    assert sorted(r["profiles"]) == ["Baseline", "Oval"]
+    assert r["profile"] == "Baseline" and r["activeProfile"] == "Baseline"
+    # an explicit (non-active) profile is honoured by controls, devices, identify
+    assert api.get_controls(profile="Oval")["profile"] == "Oval"
+    assert api.get_devices(profile="Oval")["ok"]
+    assert api.identify_input("Space", profile="Oval")["ok"]
+    # an unknown profile falls back to the active one
+    assert api.get_controls(profile="Nope")["profile"] == "Baseline"
+
+
 def test_migrates_legacy_bare_keys_into_active_profile(cfg, corpus_cfg_bytes):
     # 1) legacy install: controls.cfg at the top level, no profiles yet
     (cfg.iracing_dir / "controls.cfg").write_bytes(corpus_cfg_bytes)
