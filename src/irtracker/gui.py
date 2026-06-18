@@ -33,7 +33,7 @@ from irtracker.config import (
 from irtracker.gfcc import codec
 from irtracker.gfcc.codec import GfccError
 from irtracker.gfcc.patch import remap_device, remap_joycalib
-from irtracker.repo import Snapshot
+from irtracker.repo import GitError, Snapshot
 from irtracker.simstate import ContextCache, sim_running
 from irtracker.snapshot import SimRunningError, Tracker, backup_live_file
 
@@ -700,25 +700,14 @@ class GuiApi:
         return None
 
     def _bindings(self, doc: dict) -> list[dict]:
-        from irtracker.gfcc.keymap import VK_NAMES
+        from irtracker.gfcc.analyze import binding_value
         devices = doc.get("_devices", {})
         out = []
         for e in doc["controls"]["entries"]:
             kind = e.get("type", "unbound")
             value = e.get("value", 0)
-            display = "Not assigned"
-            device = None
-
-            if kind == "key":
-                display = e.get("_key") or VK_NAMES.get(value, f"key {value}")
-                device = "Keyboard"
-            elif kind == "axis":
-                display = f"Axis {value}"
-            elif kind == "button":
-                if "_button" in e:
-                    display = e["_button"]
-                elif value:
-                    display = "+".join(f"Btn {b}" for b in _bits(value))
+            display = binding_value(e)
+            device = "Keyboard" if kind == "key" else None
 
             # Resolve a device for wheel/pedal bindings via the product GUID slot.
             for i in range(3):
@@ -737,6 +726,58 @@ class GuiApi:
                 "device": device,
             })
         return out
+
+    def blame_control(self, action: str, profile: str | None = None) -> dict:
+        """When did a control's binding last change? Walks the controls.cfg
+        history (rename-aware) for one action and returns its change timeline,
+        newest first, each with value + when/why/where it changed."""
+        tracker = self._tracker()
+        if tracker is None:
+            return _err(self._cfg_error or "could not load configuration")
+        cfg, repo = tracker.cfg, tracker.repo
+        if not repo.initialized or not repo.head():
+            return _ok(action=action, events=[], current=None)
+        from irtracker.gfcc.analyze import binding_value
+        view = profile if profile in cfg.control_profile_names() \
+            else active_control_profile(cfg.iracing_dir)
+        key = f"profiles/controls/{view}/controls.cfg" if view else "controls.cfg"
+
+        def value_at(commit: str):
+            # The file may sit at the profile path now or at the bare top-level
+            # path in pre-migration history; try both.
+            data = None
+            for name in (key, "controls.cfg"):
+                try:
+                    data = repo.show_file(commit, name)
+                    break
+                except GitError:
+                    continue
+            if data is None:
+                return None
+            try:
+                doc = codec.decode_bytes(data)
+            except GfccError:
+                return None
+            entry = next((e for e in doc["controls"]["entries"]
+                          if e["name"] == action), None)
+            return binding_value(entry) if entry else "Not assigned"
+
+        snaps = repo.log(path=key, follow=True)  # newest first
+        seq = [(s, value_at(s.commit)) for s in reversed(snaps)]  # oldest first
+        seq = [(s, v) for s, v in seq if v is not None]
+        events, prev = [], object()
+        for s, v in seq:
+            if v != prev:
+                events.append({
+                    "value": v, "date": s.author_date, "trigger": s.meta.trigger,
+                    "car": s.meta.car, "track": s.meta.track,
+                    "message": s.meta.message, "rev": s.commit,
+                    "contextLabel": s.meta.context_label(),
+                })
+            prev = v
+        events.reverse()  # newest first
+        return _ok(action=action, events=events,
+                   current=(seq[-1][1] if seq else None))
 
     def identify_input(self, query: str, profile: str | None = None) -> dict:
         """Reverse lookup: what action(s) a key/button/axis is bound to."""

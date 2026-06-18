@@ -174,6 +174,37 @@ def test_known_good_restore_points(tmp_path, corpus_cfg_bytes):
     assert api.get_overview()["lastKnownGood"] is None
 
 
+def test_blame_control_timeline(tmp_path, corpus_cfg_bytes):
+    from irtracker.gui import GuiApi
+    from irtracker.gfcc import codec
+    ira = tmp_path / "iRacing"; ira.mkdir()
+    (ira / "app.ini").write_text("[ControlProfiles]\nGlobal=Baseline\n", encoding="utf-8")
+    d = ira / "profiles" / "controls" / "Baseline"; d.mkdir(parents=True)
+    cfile = d / "controls.cfg"; cfile.write_bytes(corpus_cfg_bytes)
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(
+        f'[paths]\niracing_dir = "{ira.as_posix()}"\n'
+        f'data_dir = "{(tmp_path / "data").as_posix()}"\n'
+        f'[watcher]\nsim_processes = ["___no_such_sim___.exe"]\n', encoding="utf-8")
+    api = GuiApi(str(cfg_path))
+
+    api.backup_now("v1")  # ToggleUIVisible = Space
+    doc = codec.decode_bytes(cfile.read_bytes())
+    e = next(x for x in doc["controls"]["entries"] if x["name"] == "ToggleUIVisible")
+    e["value"] = 70; e["modifiers"] = 0x300000  # rebind to Alt+F
+    cfile.write_bytes(codec.build(doc))
+    api.backup_now("rebind")
+
+    b = api.blame_control("ToggleUIVisible")
+    assert b["current"] == "Alt+F"
+    assert [ev["value"] for ev in b["events"]] == ["Alt+F", "Space"]  # newest first
+    assert b["events"][0]["message"] == "rebind"
+
+    # an unchanged control yields a single event; an unknown one doesn't crash
+    assert len(api.blame_control("BlackBoxToggle")["events"]) == 1
+    assert api.blame_control("NoSuchAction")["current"] == "Not assigned"
+
+
 def test_migrates_legacy_bare_keys_into_active_profile(cfg, corpus_cfg_bytes):
     # 1) legacy install: controls.cfg at the top level, no profiles yet
     (cfg.iracing_dir / "controls.cfg").write_bytes(corpus_cfg_bytes)

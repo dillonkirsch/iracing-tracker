@@ -203,6 +203,21 @@ function promptModal({ title, body = "", placeholder = "", confirmLabel = "Save"
   });
 }
 
+function infoModal({ title, bodyHtml }) {
+  const root = $("#modalRoot");
+  root.innerHTML = `
+    <div class="modal-bg">
+      <div class="modal" style="max-width:460px">
+        <h3>${esc(title)}</h3>
+        <div style="max-height:52vh;overflow:auto;margin-top:4px">${bodyHtml}</div>
+        <div class="modal-actions"><button class="btn btn-primary" data-act="ok">Close</button></div>
+      </div>
+    </div>`;
+  const done = () => { root.innerHTML = ""; };
+  root.querySelector('[data-act="ok"]').onclick = done;
+  root.querySelector(".modal-bg").onclick = (e) => { if (e.target.classList.contains("modal-bg")) done(); };
+}
+
 function colorizeDiff(text) {
   return esc(text).split("\n").map((line) => {
     const t = line.trimStart();
@@ -642,7 +657,7 @@ async function renderControls() {
     <input class="search" id="ctlSearch" placeholder="Search controls (e.g. throttle, pit, shift)…" value="${esc(state.controlsFilter)}">
     <div class="card" style="padding:14px">
       <div class="spread" style="margin-bottom:10px">
-        <span class="muted" style="font-size:12.5px">${c.boundCount} of ${c.bindings.length} controls are assigned</span>
+        <span class="muted" style="font-size:12.5px">${c.boundCount} of ${c.bindings.length} controls are assigned · click any control to see when it last changed</span>
         <label class="row-gap" style="font-size:12.5px;cursor:pointer"><input type="checkbox" id="showUnbound" ${state.showUnbound ? "checked" : ""}> Show unassigned</label>
       </div>
       <table class="ctl-table"><thead><tr><th>Control</th><th>Assigned to</th><th>Device</th></tr></thead>
@@ -691,6 +706,31 @@ function eventToQuery(ev) {
   if (ev.shiftKey) mods.push("shift");
   if (ev.altKey) mods.push("alt");
   return [...mods, key].join("+");
+}
+
+async function doBlameControl(action) {
+  const r = await api("blame_control", action, state.controlsProfile);
+  if (!r.ok) { toast(r.error || "Couldn't load this control's history.", "bad"); return; }
+  const title = `${prettyAction(action)} — history`;
+  if (!r.events.length) {
+    infoModal({ title, bodyHtml: `<p class="muted">No saved history yet for this control. Once you back up after a change, you'll see when it changed here.</p>` });
+    return;
+  }
+  const lead = r.events.length === 1
+    ? `<p class="muted" style="font-size:12.5px;margin:0 0 12px">Set once and unchanged since.</p>`
+    : `<p class="muted" style="font-size:12.5px;margin:0 0 12px">${r.events.length} changes on record — newest first.</p>`;
+  const rows = r.events.map((ev, i) => {
+    const ctx = ev.contextLabel && ev.contextLabel !== "manual edit" ? ` · ${esc(ev.contextLabel)}` : "";
+    const note = ev.message ? `<div class="tl-msg" style="margin-top:3px">“${esc(ev.message)}”</div>` : "";
+    const now = i === 0 ? `<span class="chip tag-chip" style="margin-left:6px">now</span>` : "";
+    return `<div class="file-row" style="align-items:flex-start">
+      <div class="file-ico">${icon("clock")}</div>
+      <div style="flex:1">
+        <div class="file-name"><span class="bind key">${esc(ev.value)}</span>${now}</div>
+        <div class="file-desc">${esc(fmtDate(ev.date))} · ${esc(triggerLabel(ev.trigger))}${ctx}</div>${note}
+      </div></div>`;
+  }).join("");
+  infoModal({ title, bodyHtml: lead + rows });
 }
 
 async function doIdentify(query) {
@@ -758,9 +798,10 @@ function renderCtlRows() {
   if (!rows.length) { body.innerHTML = `<tr><td colspan="3" class="muted" style="padding:18px">No controls match your search.</td></tr>`; return; }
   body.innerHTML = rows.map((b) => {
     const bad = conflicting.has(b.action);
-    return `<tr class="${bad ? "conflict" : ""}"><td class="ctl-action">${esc(prettyAction(b.action))}${bad ? `<span class="conflict-badge">conflict</span>` : ""}</td>
+    return `<tr class="ctl-row ${bad ? "conflict" : ""}" data-action="blame-control" data-name="${esc(b.action)}" style="cursor:pointer" title="See when this control last changed">
+      <td class="ctl-action">${esc(prettyAction(b.action))}${bad ? `<span class="conflict-badge">conflict</span>` : ""}</td>
       <td><span class="bind ${b.kind}">${esc(b.display)}</span></td>
-      <td class="ctl-device">${esc(b.device || "—")}</td></tr>`;
+      <td class="ctl-device">${esc(b.device || "—")} ${icon("clock", "ico ctl-hist")}</td></tr>`;
   }).join("");
 }
 
@@ -1299,6 +1340,7 @@ document.addEventListener("click", (e) => {
   if (a === "browse-iracing") return doBrowse("setIracing");
   if (a === "browse-data") return doBrowse("setData");
   if (a === "save-settings") return doSaveSettings();
+  if (a === "blame-control") return doBlameControl(btn.dataset.name);
   if (a === "identify") return doIdentify(($("#identifyInput") || {}).value);
   if (a === "refresh-controls") return renderControls();
   if (a === "check-update") return doCheckUpdate(btn);

@@ -58,6 +58,15 @@ def _populate() -> str:
         new = re.sub(r"(CalibCenter:\s*)(\d+)", lambda m: f"{m.group(1)}{int(m.group(2)) + 1}",
                      text, count=1)
         jc.write_text(new if new != text else text + "\n# preview tweak\n", encoding="utf-8")
+    # also rebind a control so per-control "blame" history has something to show
+    cc = prof / "controls.cfg"
+    if cc.exists():
+        from irtracker.gfcc import codec
+        doc = codec.decode_bytes(cc.read_bytes())
+        e = next((x for x in doc["controls"]["entries"] if x["name"] == "ToggleUIVisible"), None)
+        if e:
+            e["value"] = 70; e["modifiers"] = 0x300000  # rebind to Alt+F
+            cc.write_bytes(codec.build(doc))
     b = api.backup_now("after a small tweak")
     if b.get("rev"):
         api.create_tag("daytona-good", b["rev"], "known good at Daytona")

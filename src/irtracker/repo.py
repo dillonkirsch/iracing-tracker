@@ -182,11 +182,15 @@ class SnapshotRepo:
 
     # -- history -----------------------------------------------------------
 
-    def log(self, path: str | None = None, limit: int | None = None) -> list[Snapshot]:
+    def log(self, path: str | None = None, limit: int | None = None,
+            follow: bool = False) -> list[Snapshot]:
         sep, rec_sep = "\x1f", "\x1e"
         args = ["log", f"--format=%H{sep}%aI{sep}%B{rec_sep}"]
         if limit:
             args.append(f"-n{limit}")
+        if follow and path:
+            args.append("--follow")  # track the file across renames (e.g. the
+            #                          controls.cfg -> profile-folder migration)
         if path:
             args += ["--", path]
         proc = self.git(*args, check=False)

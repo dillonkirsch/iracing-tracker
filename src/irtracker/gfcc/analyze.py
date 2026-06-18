@@ -85,6 +85,24 @@ def _key_label(mods: int, value: int) -> str:
     return f"{note}+{name}" if note else name
 
 
+def binding_value(entry: dict[str, Any]) -> str:
+    """Human display of the physical input an entry is bound to (no device):
+    'Alt+F', 'Btn 5', 'Axis 3', or 'Not assigned'. Shared by the live Controls
+    view and per-control blame so values compare consistently across history."""
+    kind = entry.get("type", "unbound")
+    value = entry.get("value", 0)
+    if kind == "key":
+        return entry.get("_key") or VK_NAMES.get(value, f"key {value}")
+    if kind == "axis":
+        return f"Axis {value}"
+    if kind == "button":
+        if entry.get("_button"):
+            return entry["_button"]
+        if value:
+            return "+".join(f"Btn {b}" for b in _bits(value))
+    return "Not assigned"
+
+
 def _context(name: str) -> str:
     """iRacing input context an action belongs to. The sim reuses the same key
     across contexts on purpose (e.g. 'A' pans the camera in the replay tool AND

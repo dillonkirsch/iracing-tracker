@@ -275,6 +275,8 @@ body {
 .bind.key    { color: #86efac; }
 .bind.unbound { color: var(--text-faint); font-family: var(--font); font-weight: 500; }
 .ctl-device { color: var(--text-dim); }
+.ctl-hist { width: 13px; height: 13px; opacity: .35; vertical-align: -2px; margin-left: 5px; }
+.ctl-table tr:hover .ctl-hist { opacity: .85; }
 
 .conflict-banner { border-color: rgba(251,191,36,.45); background: var(--warn-bg); }
 .conflict-badge {
