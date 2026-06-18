@@ -779,6 +779,104 @@ class GuiApi:
         return _ok(action=action, events=events,
                    current=(seq[-1][1] if seq else None))
 
+    @staticmethod
+    def _text_at(repo, rev: str, name: str) -> str | None:
+        try:
+            return repo.show_file(rev, name).decode("utf-8", "replace")
+        except GitError:
+            return None
+
+    def blame_setting(self, file: str, section: str, key: str) -> dict:
+        """When did an INI setting last change? Walk a tracked file's history for
+        one Section/key and return its change timeline (newest first)."""
+        tracker = self._tracker()
+        if tracker is None:
+            return _err(self._cfg_error or "could not load configuration")
+        repo = tracker.repo
+        base = dict(file=file, section=section, key=key)
+        if not repo.initialized or not repo.head():
+            return _ok(**base, events=[], current=None)
+        from irtracker.semdiff import parse_ini
+
+        def value_at(commit: str):
+            text = self._text_at(repo, commit, file)
+            if text is None:
+                return None
+            return parse_ini(text).get(section, {}).get(key)
+
+        snaps = repo.log(path=file)  # newest first
+        seq = [(s, value_at(s.commit)) for s in reversed(snaps)]  # oldest first
+        events, prev = [], object()
+        for s, v in seq:
+            if v != prev:
+                events.append({
+                    "value": v, "date": s.author_date, "trigger": s.meta.trigger,
+                    "car": s.meta.car, "track": s.meta.track,
+                    "message": s.meta.message, "rev": s.commit,
+                    "contextLabel": s.meta.context_label(),
+                })
+            prev = v
+        events.reverse()
+        return _ok(**base, events=events, current=(seq[-1][1] if seq else None))
+
+    def _recent_setting_changes(self, tracker, ini_files: list[str],
+                                max_snaps: int = 40, limit: int = 40) -> list[dict]:
+        """Settings whose VALUE changed across recent snapshots (newest first,
+        de-duplicated to the most recent change; ignored keys excluded)."""
+        from irtracker.semdiff import CHANGED, diff_ini, matches_ignore
+        repo, cfg = tracker.repo, tracker.cfg
+        ignore_by_file = {n: (cfg.policy_for(n).ignore_keys if cfg.policy_for(n) else [])
+                          for n in ini_files}
+        ini_set = {n.lower() for n in ini_files}
+        out: list[dict] = []
+        seen: set[tuple] = set()
+        for s in repo.log()[:max_snaps]:
+            for name in (n for n in s.meta.files if n.lower() in ini_set):
+                new_text = self._text_at(repo, s.commit, name)
+                if new_text is None:
+                    continue
+                old_text = self._text_at(repo, f"{s.commit}~1", name) or ""
+                for ch in diff_ini(old_text, new_text):
+                    if ch.kind != CHANGED:
+                        continue
+                    if matches_ignore(ch.section, ch.key, ignore_by_file.get(name, [])):
+                        continue
+                    ident = (name, ch.section, ch.key)
+                    if ident in seen:
+                        continue
+                    seen.add(ident)
+                    out.append({"file": name, "section": ch.section, "key": ch.key,
+                                "value": ch.new, "date": s.author_date,
+                                "trigger": s.meta.trigger,
+                                "contextLabel": s.meta.context_label()})
+                    if len(out) >= limit:
+                        return out
+        return out
+
+    def list_settings(self) -> dict:
+        """All current INI settings (for client-side search) + recently-changed
+        ones (the default view), each clickable for its change history."""
+        tracker = self._tracker()
+        if tracker is None:
+            return _err(self._cfg_error or "could not load configuration")
+        cfg = tracker.cfg
+        from irtracker.semdiff import parse_ini
+        ini_files = [n for n in cfg.tracked_files_present() if n.lower().endswith(".ini")]
+        all_keys: list[dict] = []
+        for name in sorted(ini_files):
+            try:
+                text = cfg.live_path(name).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for section, keys in parse_ini(text).items():
+                for key, value in keys.items():
+                    all_keys.append({"file": name, "section": section,
+                                     "key": key, "value": value})
+        recent = []
+        if tracker.repo.initialized and tracker.repo.head():
+            recent = self._recent_setting_changes(tracker, ini_files)
+        return _ok(all=all_keys, recent=recent)
+
     def identify_input(self, query: str, profile: str | None = None) -> dict:
         """Reverse lookup: what action(s) a key/button/axis is bound to."""
         cfg = self._config()

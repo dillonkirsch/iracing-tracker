@@ -205,6 +205,36 @@ def test_blame_control_timeline(tmp_path, corpus_cfg_bytes):
     assert api.blame_control("NoSuchAction")["current"] == "Not assigned"
 
 
+def test_blame_setting_and_list_settings(tmp_path):
+    from irtracker.gui import GuiApi
+    ira = tmp_path / "iRacing"; ira.mkdir()
+    (ira / "app.ini").write_text(
+        "[Force Feedback]\nstrength=20.0\n\n[Graphics]\nFOV=90\n", encoding="utf-8")
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(
+        f'[paths]\niracing_dir = "{ira.as_posix()}"\n'
+        f'data_dir = "{(tmp_path / "data").as_posix()}"\n'
+        f'[watcher]\nsim_processes = ["___no_such_sim___.exe"]\n', encoding="utf-8")
+    api = GuiApi(str(cfg_path))
+    api.backup_now("v1")
+    (ira / "app.ini").write_text(
+        "[Force Feedback]\nstrength=35.0\n\n[Graphics]\nFOV=90\n", encoding="utf-8")
+    api.backup_now("bumped strength")
+
+    b = api.blame_setting("app.ini", "Force Feedback", "strength")
+    assert b["current"] == "35.0"
+    assert [e["value"] for e in b["events"]] == ["35.0", "20.0"]  # newest first
+    # an unchanged setting has a single event
+    assert len(api.blame_setting("app.ini", "Graphics", "FOV")["events"]) == 1
+
+    ls = api.list_settings()
+    allkeys = {(it["section"], it["key"]) for it in ls["all"]}
+    assert ("Force Feedback", "strength") in allkeys and ("Graphics", "FOV") in allkeys
+    recent = {(r["section"], r["key"]) for r in ls["recent"]}
+    assert ("Force Feedback", "strength") in recent  # value changed -> recent
+    assert ("Graphics", "FOV") not in recent          # unchanged -> not recent
+
+
 def test_migrates_legacy_bare_keys_into_active_profile(cfg, corpus_cfg_bytes):
     # 1) legacy install: controls.cfg at the top level, no profiles yet
     (cfg.iracing_dir / "controls.cfg").write_bytes(corpus_cfg_bytes)

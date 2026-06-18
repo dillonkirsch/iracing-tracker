@@ -246,6 +246,8 @@ const state = {
   controlsFilter: "",
   controlsProfile: null,  // which iRacing control profile the Controls view shows
   showUnbound: false,
+  settings: null,
+  settingsQuery: "",
 };
 
 /* --------------------------------------------------------------- data loads */
@@ -268,6 +270,7 @@ function render() {
   if (v === "history") return renderHistory();
   if (v === "profiles") return renderProfiles();
   if (v === "controls") return renderControls();
+  if (v === "gamesettings") return renderGameSettings();
   if (v === "settings") return renderSettings();
 }
 
@@ -708,29 +711,41 @@ function eventToQuery(ev) {
   return [...mods, key].join("+");
 }
 
-async function doBlameControl(action) {
-  const r = await api("blame_control", action, state.controlsProfile);
-  if (!r.ok) { toast(r.error || "Couldn't load this control's history.", "bad"); return; }
-  const title = `${prettyAction(action)} — history`;
+function blameEventsHtml(events) {
+  return events.map((ev, i) => {
+    const ctx = ev.contextLabel && ev.contextLabel !== "manual edit" ? ` · ${esc(ev.contextLabel)}` : "";
+    const note = ev.message ? `<div class="tl-msg" style="margin-top:3px">“${esc(ev.message)}”</div>` : "";
+    const now = i === 0 ? `<span class="chip tag-chip" style="margin-left:6px">now</span>` : "";
+    const val = ev.value == null
+      ? `<span class="bind unbound">(not set)</span>`
+      : `<span class="bind key">${esc(ev.value)}</span>`;
+    return `<div class="file-row" style="align-items:flex-start">
+      <div class="file-ico">${icon("clock")}</div>
+      <div style="flex:1">
+        <div class="file-name">${val}${now}</div>
+        <div class="file-desc">${esc(fmtDate(ev.date))} · ${esc(triggerLabel(ev.trigger))}${ctx}</div>${note}
+      </div></div>`;
+  }).join("");
+}
+
+function showBlame(title, r) {
+  if (!r.ok) { toast(r.error || "Couldn't load this item's history.", "bad"); return; }
   if (!r.events.length) {
-    infoModal({ title, bodyHtml: `<p class="muted">No saved history yet for this control. Once you back up after a change, you'll see when it changed here.</p>` });
+    infoModal({ title, bodyHtml: `<p class="muted">No saved history yet. Once you back up after a change, you'll see when it changed here.</p>` });
     return;
   }
   const lead = r.events.length === 1
     ? `<p class="muted" style="font-size:12.5px;margin:0 0 12px">Set once and unchanged since.</p>`
     : `<p class="muted" style="font-size:12.5px;margin:0 0 12px">${r.events.length} changes on record — newest first.</p>`;
-  const rows = r.events.map((ev, i) => {
-    const ctx = ev.contextLabel && ev.contextLabel !== "manual edit" ? ` · ${esc(ev.contextLabel)}` : "";
-    const note = ev.message ? `<div class="tl-msg" style="margin-top:3px">“${esc(ev.message)}”</div>` : "";
-    const now = i === 0 ? `<span class="chip tag-chip" style="margin-left:6px">now</span>` : "";
-    return `<div class="file-row" style="align-items:flex-start">
-      <div class="file-ico">${icon("clock")}</div>
-      <div style="flex:1">
-        <div class="file-name"><span class="bind key">${esc(ev.value)}</span>${now}</div>
-        <div class="file-desc">${esc(fmtDate(ev.date))} · ${esc(triggerLabel(ev.trigger))}${ctx}</div>${note}
-      </div></div>`;
-  }).join("");
-  infoModal({ title, bodyHtml: lead + rows });
+  infoModal({ title, bodyHtml: lead + blameEventsHtml(r.events) });
+}
+
+async function doBlameControl(action) {
+  showBlame(`${prettyAction(action)} — history`, await api("blame_control", action, state.controlsProfile));
+}
+
+async function doBlameSetting(file, section, key) {
+  showBlame(`${key} — history`, await api("blame_setting", file, section, key));
 }
 
 async function doIdentify(query) {
@@ -841,6 +856,66 @@ function renderDevicesAside() {
   aside.innerHTML = `
     <p class="section-label">Connected now</p>${connected}
     <p class="section-label" style="margin-top:18px">Used in your controls</p>${referenced}`;
+}
+
+/* ========================================================== GAME SETTINGS */
+async function renderGameSettings() {
+  const content = $("#content");
+  $("#aside").innerHTML = "";
+  content.innerHTML = `<div class="loading">Loading your settings…</div>`;
+  state.settings = await api("list_settings");
+  const s = state.settings;
+  if (!s || !s.ok) {
+    content.innerHTML = `<div class="page-head"><h1 class="page-title">Game Settings</h1></div>
+      <div class="empty">${icon("sliders")}<h3>Settings unavailable</h3>
+      <p>${esc((s && s.error) || "Couldn’t read your settings files.")}</p></div>`;
+    return;
+  }
+  content.innerHTML = `
+    <div class="page-head"><h1 class="page-title">Game Settings</h1>
+      <p class="page-sub">Your iRacing config values. Search a setting and click it to see when it last changed. Read-only — change these inside iRacing.</p></div>
+    <input class="search" id="setSearch" placeholder="Find a setting (e.g. memory, FOV, mirror, fps)…" value="${esc(state.settingsQuery || "")}">
+    <div id="setResults"></div>`;
+  const inp = $("#setSearch");
+  inp.addEventListener("input", (e) => { state.settingsQuery = e.target.value; renderSettingsRows(); });
+  renderSettingsRows();
+  inp.focus();
+}
+
+function settingRow(it, withDate) {
+  const loc = it.section ? `${esc(it.section)} · ` : "";
+  const when = (withDate && it.date) ? ` · changed ${esc(fmtDate(it.date))}` : "";
+  const val = it.value == null ? "(not set)" : it.value;
+  return `<div class="file-row" data-action="blame-setting" data-file="${esc(it.file)}" data-section="${esc(it.section)}" data-key="${esc(it.key)}" style="cursor:pointer" title="See when this setting last changed">
+    <div class="file-ico">${icon(fileIconName(it.file))}</div>
+    <div style="flex:1">
+      <div class="file-name">${esc(it.key)} <span class="bind key" style="margin-left:6px">${esc(val)}</span></div>
+      <div class="file-desc">${loc}${esc(fileLabel(it.file))}${when}</div>
+    </div>
+    <div class="file-meta">${icon("clock", "ico ctl-hist")}</div>
+  </div>`;
+}
+
+function renderSettingsRows() {
+  const s = state.settings;
+  const box = $("#setResults");
+  if (!s || !box) return;
+  const q = (state.settingsQuery || "").trim().toLowerCase();
+  if (!q) {
+    if (!s.recent || !s.recent.length) {
+      box.innerHTML = `<div class="card"><p class="muted mt-0">Type above to find any setting. Once you’ve backed up a few changes, the settings you’ve recently tweaked will show up here.</p></div>`;
+      return;
+    }
+    box.innerHTML = `<div class="card"><p class="section-label mt-0">${icon("clock")} Recently changed settings</p>${s.recent.map((it) => settingRow(it, true)).join("")}</div>`;
+    return;
+  }
+  const matches = (s.all || []).filter((it) =>
+    `${it.section} ${it.key} ${it.value}`.toLowerCase().includes(q)).slice(0, 200);
+  if (!matches.length) {
+    box.innerHTML = `<div class="card"><p class="muted mt-0">No settings match “${esc(state.settingsQuery)}”.</p></div>`;
+    return;
+  }
+  box.innerHTML = `<div class="card"><p class="section-label mt-0">${matches.length} match${matches.length > 1 ? "es" : ""}</p>${matches.map((it) => settingRow(it, false)).join("")}</div>`;
 }
 
 /* ============================================================== PROFILES */
@@ -1341,6 +1416,7 @@ document.addEventListener("click", (e) => {
   if (a === "browse-data") return doBrowse("setData");
   if (a === "save-settings") return doSaveSettings();
   if (a === "blame-control") return doBlameControl(btn.dataset.name);
+  if (a === "blame-setting") return doBlameSetting(btn.dataset.file, btn.dataset.section, btn.dataset.key);
   if (a === "identify") return doIdentify(($("#identifyInput") || {}).value);
   if (a === "refresh-controls") return renderControls();
   if (a === "check-update") return doCheckUpdate(btn);

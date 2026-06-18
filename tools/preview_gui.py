@@ -35,7 +35,12 @@ def _populate() -> str:
     data = tmp / "data"; data.mkdir()
     # Mirror iRacing's control-profiles layout: controls.cfg/joyCalib.yaml live in
     # a profile subfolder named by app.ini's [ControlProfiles] Global key.
-    (ira / "app.ini").write_text("[ControlProfiles]\nGlobal=Baseline\n", encoding="utf-8")
+    (ira / "app.ini").write_text(
+        "[ControlProfiles]\nGlobal=Baseline\n\n"
+        "[Force Feedback]\nstrength=20.0\ndampingFactor=0.10\n\n"
+        "[Graphics]\nFieldOfView=90\nmaxWorkingSetMB_64=4096\nmirrorQuality=2\n",
+        encoding="utf-8")
+    (ira / "core.ini").write_text("[Audio]\nmasterVolume=80\nengineVolume=65\n", encoding="utf-8")
     # Seed two control profiles so per-profile history/labels are exercised.
     prof = ira / "profiles" / "controls" / "Baseline"; prof.mkdir(parents=True)
     for profile in ("Baseline", "Oval"):
@@ -67,6 +72,11 @@ def _populate() -> str:
         if e:
             e["value"] = 70; e["modifiers"] = 0x300000  # rebind to Alt+F
             cc.write_bytes(codec.build(doc))
+    # change a couple of INI settings so "recently changed settings" has content
+    ap = ira / "app.ini"
+    ap.write_text(ap.read_text(encoding="utf-8")
+                  .replace("strength=20.0", "strength=24.0")
+                  .replace("FieldOfView=90", "FieldOfView=100"), encoding="utf-8")
     b = api.backup_now("after a small tweak")
     if b.get("rev"):
         api.create_tag("daytona-good", b["rev"], "known good at Daytona")
