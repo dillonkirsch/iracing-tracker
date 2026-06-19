@@ -24,6 +24,8 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 | **Auto-update** | The packaged app checks GitHub Releases on startup and from Settings; one click downloads the new `.exe`, checksum-verifies it, swaps it in place, and relaunches. Shows a banner on Home when a newer build is available. |
 | **Reverse input lookup ("what does this do?")** | In Controls & Devices, press a key in the capture box (or type "Btn 5" / "Axis 3" / "Alt+P") to see which action(s) it's bound to — or "free". Also `gfcc whatis "<input>"` on the CLI. |
 | **First-run wizard** | On first launch (no backups yet) a friendly multi-step overlay walks new users through: welcome → confirm the iRacing folder → make the first backup → optionally enable auto-backup → done. Re-openable from Settings ("Run setup wizard"); an `onboarded` flag stops it reappearing. |
+| **Session change report** | A "Sessions" tab in Backup History groups backups into driving sessions (a run of sim-involved snapshots sharing a car/track, ended by sim exit) using the captured car/track/trigger. Each session card shows car @ track, time range, and backup count; expand it for a before-vs-after semantic diff of exactly what you changed that session (reuses the compare engine). `GuiApi.list_sessions`. |
+| **Binding inventory** | A "Inventory" button in Controls & Devices opens a clean, human-readable list of every assignment grouped by device (each wheel/pedal, then Keyboard), profile-aware, with a one-click **Copy** (plain text) for pasting into Discord/forums. Built client-side from the decoded bindings. |
 | **Configuration timeline (chart)** | A high-level chronological view in Backup History (List ⇄ Timeline toggle): a backup-activity bar chart (per day, last 1–3 weeks) + a color-coded, day-grouped event spine — Known-good / Saved Setup / Restore / Manual backup / After-a-session / Auto backup, each with a colored dot, time, and summary; click an event for its detail. Pure view over the existing history. |
 | **Light / dark theme** | Dark and light modes via a top-bar sun/moon toggle, persisted in localStorage and applied before first paint (no flash). Light palette is a `:root[data-theme="light"]` override of the centralized CSS variables. |
 | **Config blame (controls + settings)** | "When did this last change?" — click any control (Controls & Devices) **or** any INI setting (the new **Game Settings** view) to see its full change timeline: each value with when, the trigger (manual / sim-exit / auto), car/track context, and the backup note; current value tagged "now". Game Settings defaults to "recently changed settings" (value changes only, ignored keys filtered) and has a search across all INI keys. Walks the file's git history (controls rename-aware via `git log --follow`). `GuiApi.blame_control` / `blame_setting` / `list_settings`. |
@@ -47,7 +49,6 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 
 | Feature | Value | Effort | Foundation / notes |
 |---|---|---|---|
-| **Session change report** — what changed during a given driving session (car/track context already captured). | High | Easy–Med | `SnapshotMeta` already stores car/track/trigger. |
 | **Configuration history search** — find every snapshot where a key/section/action/value changed. | Med | Medium | Same history-walk machinery as blame. |
 | **Snapshot notes / annotations** — attach searchable notes to any snapshot after the fact (turns it into a tuning journal). | High | Medium | Store via git notes or a sidecar; surface in history. |
 | **Automatic iRacing build-upgrade detection** — record the active build per snapshot; auto-annotate + summarise what the seasonal update changed. | High | Med–Hard | Need a reliable source for the build version (file/registry — TBD). Great for "did I break it or did iRacing?". |
@@ -60,7 +61,6 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 | Feature | Value | Effort | Foundation / notes |
 |---|---|---|---|
 | **Config linter / sanity checker** — warn on out-of-bounds INI values (e.g. `maxWorkingSetMB_64` > physical RAM, stale VR keys) that cause stutter/crashes. | High | Medium | Needs a small rules table + system info (RAM). |
-| **Binding inventory** — human-readable list of every keyboard/wheel/pedal/button assignment. | Med | Easy | Codec already decodes; just format it. |
 | **Orphaned-file cleanup** — detect files in `Documents\iRacing` no longer used by the current build / uninstalled content. | Low–Med | Medium | Hard to know "unused" reliably. |
 
 ---

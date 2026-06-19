@@ -235,6 +235,35 @@ def test_blame_setting_and_list_settings(tmp_path):
     assert ("Graphics", "FOV") not in recent          # unchanged -> not recent
 
 
+def test_list_sessions_groups_driving_sessions(tmp_path):
+    from irtracker.config import load_config
+    from irtracker.snapshot import Tracker
+    from irtracker.gui import GuiApi
+    ira = tmp_path / "iRacing"; ira.mkdir()
+    cfgp = tmp_path / "config.toml"
+    cfgp.write_text(
+        f'[paths]\niracing_dir = "{ira.as_posix()}"\n'
+        f'data_dir = "{(tmp_path / "data").as_posix()}"\n'
+        f'[watcher]\nsim_processes = ["___no_such_sim___.exe"]\n', encoding="utf-8")
+    cfg = load_config(cfgp); t = Tracker(cfg)
+
+    def w(v): (ira / "app.ini").write_text(v, encoding="utf-8")
+    w("[FFB]\nstrength=20\n"); t.take_snapshot("manual")                       # pre-session
+    w("[FFB]\nstrength=25\n"); t.take_snapshot("event", sim_running=True, car="Porsche 992", track="Spa")
+    w("[FFB]\nstrength=30\n"); t.take_snapshot("sim_exit", car="Porsche 992", track="Spa")
+    w("[FFB]\nstrength=40\n"); t.take_snapshot("event", sim_running=True, car="Mazda MX5", track="Laguna")
+
+    api = GuiApi(str(cfgp))
+    items = api.list_sessions()["items"]
+    assert len(items) == 2
+    assert (items[0]["car"], items[0]["track"]) == ("Mazda MX5", "Laguna")  # newest first
+    spa = items[1]
+    assert spa["car"] == "Porsche 992" and spa["count"] == 2 and spa["files"] == ["app.ini"]
+    assert spa["baselineRev"]  # the pre-session manual backup
+    cmp = api.get_comparison(spa["baselineRev"], spa["endRev"], "a", "b")
+    assert [f["name"] for f in cmp["files"]] == ["app.ini"]  # before->after diff
+
+
 def test_migrates_legacy_bare_keys_into_active_profile(cfg, corpus_cfg_bytes):
     # 1) legacy install: controls.cfg at the top level, no profiles yet
     (cfg.iracing_dir / "controls.cfg").write_bytes(corpus_cfg_bytes)

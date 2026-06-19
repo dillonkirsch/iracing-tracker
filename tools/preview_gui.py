@@ -80,6 +80,16 @@ def _populate() -> str:
     b = api.backup_now("after a small tweak")
     if b.get("rev"):
         api.create_tag("daytona-good", b["rev"], "known good at Daytona")
+    # simulate a driving session (sim-running snapshots with car/track) so the
+    # Sessions view has a real session-change report to show.
+    from irtracker.config import load_config
+    from irtracker.snapshot import Tracker
+    tracker = Tracker(load_config(Path(cfg_path)))
+    car, track = "Porsche 992 GT3", "Spa-Francorchamps"
+    ap.write_text(ap.read_text(encoding="utf-8").replace("strength=24.0", "strength=28.0"), encoding="utf-8")
+    tracker.take_snapshot("event", sim_running=True, car=car, track=track)
+    ap.write_text(ap.read_text(encoding="utf-8").replace("strength=28.0", "strength=31.0"), encoding="utf-8")
+    tracker.take_snapshot("sim_exit", car=car, track=track)
     return str(cfg_path)
 
 

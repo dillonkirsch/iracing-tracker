@@ -468,10 +468,11 @@ async function renderHistory() {
     return;
   }
 
-  const tl = state.historyView === "timeline";
+  const v = state.historyView;
   const seg = `<div class="seg">
-    <button class="${tl ? "" : "on"}" data-action="hview-list">${icon("list")} List</button>
-    <button class="${tl ? "on" : ""}" data-action="hview-timeline">${icon("timeline")} Timeline</button>
+    <button class="${v === "list" ? "on" : ""}" data-action="hview-list">${icon("list")} List</button>
+    <button class="${v === "timeline" ? "on" : ""}" data-action="hview-timeline">${icon("timeline")} Timeline</button>
+    <button class="${v === "sessions" ? "on" : ""}" data-action="hview-sessions">${icon("clock")} Sessions</button>
   </div>`;
   content.innerHTML = `
     <div class="page-head spread">
@@ -480,7 +481,7 @@ async function renderHistory() {
       <div class="row-gap">${seg}
         <button class="btn btn-sm" data-action="compare-now">${icon("rotate")} What’s changed?</button></div>
     </div>
-    ${tl ? "" : compareCard()}
+    ${v === "list" ? compareCard() : ""}
     <div id="histBody"></div>`;
   renderHistBody();
   if (state.selectedRev) showBackupDetail(state.selectedRev);
@@ -490,6 +491,7 @@ async function renderHistory() {
 function renderHistBody() {
   const box = $("#histBody");
   if (!box) return;
+  if (state.historyView === "sessions") { renderSessions(); return; }
   if (state.historyView === "timeline") {
     box.innerHTML = timelineChartHtml();
     box.querySelectorAll(".tlc-evt").forEach((el) =>
@@ -743,6 +745,7 @@ async function renderControls() {
     <div class="page-head spread"><div><h1 class="page-title">Controls &amp; Devices</h1>
       <p class="page-sub">How your wheel, pedals, and keyboard are mapped in iRacing. This view is read-only.</p></div>
       <div class="row-gap">${profileSelect}
+        <button class="btn btn-sm" data-action="binding-inventory">${icon("doc")} Inventory</button>
         <button class="btn btn-sm" data-action="refresh-controls">${icon("rotate")} Refresh</button></div></div>
     ${savedStateBanner(c)}
     <div class="card" style="padding:14px;margin-bottom:16px;display:flex;gap:12px;align-items:flex-start">
@@ -845,6 +848,40 @@ function showBlame(title, r) {
 
 async function doBlameControl(action) {
   showBlame(`${prettyAction(action)} — history`, await api("blame_control", action, state.controlsProfile));
+}
+
+function doBindingInventory() {
+  const c = state.controls;
+  if (!c || !c.bindings) { toast("Open Controls & Devices first.", "bad"); return; }
+  const bound = c.bindings.filter((b) => b.kind !== "unbound");
+  if (!bound.length) { infoModal({ title: "Binding inventory", bodyHtml: `<p class="muted">No controls are assigned yet.</p>` }); return; }
+  const groups = {};
+  bound.forEach((b) => { const d = b.device || "Other"; (groups[d] = groups[d] || []).push(b); });
+  // devices first, keyboard last
+  const order = Object.keys(groups).sort((a, b) => (a === "Keyboard") - (b === "Keyboard") || a.localeCompare(b));
+  const sortRows = (arr) => arr.slice().sort((a, b) => prettyAction(a.action).localeCompare(prettyAction(b.action)));
+  const profLabel = c.profile ? ` — ${c.profile} profile` : "";
+  let text = `iRacing binding inventory${profLabel}\n${bound.length} assignments\n`;
+  order.forEach((d) => { text += `\n[${d}]\n`; sortRows(groups[d]).forEach((b) => { text += `  ${prettyAction(b.action)}: ${b.display}\n`; }); });
+  state.inventoryText = text;
+  const html = `
+    <div class="spread" style="margin-bottom:12px">
+      <span class="muted" style="font-size:12.5px">${bound.length} assignments · ${order.length} device${order.length === 1 ? "" : "s"}${c.profile ? " · " + esc(c.profile) + " profile" : ""}</span>
+      <button class="btn btn-sm" data-action="copy-inventory">${icon("doc")} Copy</button>
+    </div>
+    ${order.map((d) => `
+      <div style="margin-bottom:14px">
+        <div class="section-label" style="margin-bottom:6px">${icon(d === "Keyboard" ? "doc" : "gamepad")} ${esc(d)} <span class="muted" style="font-weight:500;letter-spacing:0;text-transform:none">· ${groups[d].length}</span></div>
+        ${sortRows(groups[d]).map((b) => `
+          <div class="file-row" style="padding:6px 2px"><div style="flex:1">${esc(prettyAction(b.action))}</div>
+            <span class="bind ${b.kind}">${esc(b.display)}</span></div>`).join("")}
+      </div>`).join("")}`;
+  infoModal({ title: "Binding inventory", bodyHtml: html });
+}
+
+async function copyInventory() {
+  try { await navigator.clipboard.writeText(state.inventoryText || ""); toast("Inventory copied to clipboard.", "good"); }
+  catch (e) { toast("Couldn't access the clipboard — select the text to copy it.", "bad"); }
 }
 
 async function doBlameSetting(file, section, key) {
@@ -959,6 +996,64 @@ function renderDevicesAside() {
   aside.innerHTML = `
     <p class="section-label">Connected now</p>${connected}
     <p class="section-label" style="margin-top:18px">Used in your controls</p>${referenced}`;
+}
+
+/* ---- driving sessions (session change report) ---- */
+async function renderSessions() {
+  const box = $("#histBody");
+  if (!box) return;
+  box.innerHTML = `<div class="loading">Grouping your driving sessions…</div>`;
+  const r = await api("list_sessions");
+  state.sessions = r.ok ? r.items : [];
+  if (!state.sessions.length) {
+    box.innerHTML = `<div class="empty">${icon("clock")}<h3>No driving sessions yet</h3>
+      <p>When you drive with iRacing running, the app groups the changes you made during each session here — by car and track. Have a session, then check back.</p></div>`;
+    return;
+  }
+  box.innerHTML = state.sessions.map((s, i) => sessionCard(s, i)).join("");
+}
+
+function sessionWhen(s) {
+  const start = fmtDate(s.start), endT = timeOnly(s.end);
+  if (new Date(s.start).toDateString() === new Date(s.end).toDateString() && timeOnly(s.start) !== endT)
+    return `${start}–${endT}`;
+  return start;
+}
+
+function sessionCard(s, i) {
+  const ctx = (s.car || s.track) ? [s.car, s.track].filter(Boolean).join(" @ ") : "Sim session (car/track unknown)";
+  const files = [...new Set((s.files || []).map(fileLabel))];
+  const sub = `${esc(sessionWhen(s))} · ${s.count} backup${s.count === 1 ? "" : "s"}${files.length ? " · " + esc(files.slice(0, 3).join(", ")) : ""}`;
+  return `<div class="card" style="margin-bottom:12px;padding:0">
+    <div class="spread" data-action="toggle-session" data-i="${i}" style="cursor:pointer;padding:16px 18px">
+      <div><div style="font-weight:650;font-size:15px">${icon("clock")} ${esc(ctx)}</div>
+        <div class="muted" style="font-size:12.5px;margin-top:3px">${sub}</div></div>
+      <span class="btn btn-sm btn-ghost">View changes</span>
+    </div>
+    <div id="sess-${i}" style="padding:0 18px"></div>
+  </div>`;
+}
+
+async function doSessionDetail(i) {
+  const s = (state.sessions || [])[i];
+  const box = document.getElementById("sess-" + i);
+  if (!s || !box) return;
+  if (box.dataset.open) { box.innerHTML = ""; delete box.dataset.open; return; }
+  box.dataset.open = "1";
+  box.innerHTML = `<div class="loading" style="padding:12px">Comparing before vs after…</div>`;
+  if (!s.baselineRev) {
+    const files = [...new Set((s.files || []).map(fileLabel))];
+    box.innerHTML = `<p class="muted" style="padding:0 0 16px">This is your earliest recorded session, so there's no earlier state to compare against. Files touched: ${files.length ? esc(files.join(", ")) : "none"}.</p>`;
+    return;
+  }
+  const r = await api("get_comparison", s.baselineRev, s.endRev, "Before session", "After session");
+  if (!r.ok) { box.innerHTML = `<p class="muted" style="padding:0 0 16px">${esc(r.error)}</p>`; return; }
+  if (!r.files.length) {
+    box.innerHTML = `<div class="empty" style="padding:14px 10px 22px">${icon("shieldCheck")}<p>No saved config changes during this session.</p></div>`;
+    return;
+  }
+  box.innerHTML = `<div class="section-label" style="margin:4px 0 8px">What changed during this session</div>
+    <div style="padding-bottom:14px">${r.files.map((f) => `<div class="diff-file"><h4>${esc(fileLabel(f.name))}</h4><div class="diff-body">${colorizeDiff(f.body)}</div></div>`).join("")}</div>`;
 }
 
 /* ========================================================== GAME SETTINGS */
@@ -1500,6 +1595,8 @@ document.addEventListener("click", (e) => {
   if (a === "compare-now") return compareNow();
   if (a === "hview-list") { state.historyView = "list"; return renderHistory(); }
   if (a === "hview-timeline") { state.historyView = "timeline"; return renderHistory(); }
+  if (a === "hview-sessions") { state.historyView = "sessions"; return renderHistory(); }
+  if (a === "toggle-session") return doSessionDetail(+btn.dataset.i);
   if (a === "goto-settings") return setView("settings");
   if (a === "open-iracing") return api("open_folder", "iracing");
   if (a === "open-data") return api("open_folder", "data");
@@ -1520,6 +1617,8 @@ document.addEventListener("click", (e) => {
   if (a === "browse-iracing") return doBrowse("setIracing");
   if (a === "browse-data") return doBrowse("setData");
   if (a === "save-settings") return doSaveSettings();
+  if (a === "binding-inventory") return doBindingInventory();
+  if (a === "copy-inventory") return copyInventory();
   if (a === "blame-control") return doBlameControl(btn.dataset.name);
   if (a === "blame-setting") return doBlameSetting(btn.dataset.file, btn.dataset.section, btn.dataset.key);
   if (a === "identify") return doIdentify(($("#identifyInput") || {}).value);

@@ -606,6 +606,52 @@ class GuiApi:
             return _err(str(exc))
         return _ok(message="Removed that known-good mark.")
 
+    # -- driving sessions (group history by sim session, FR-6 context) ---------
+
+    def list_sessions(self) -> dict:
+        """Group backups into driving sessions (a run of sim-involved snapshots
+        sharing a car/track, ended by sim exit). Each carries the revs needed to
+        diff before-vs-after via get_comparison."""
+        tracker = self._tracker()
+        if tracker is None:
+            return _err(self._cfg_error or "could not load configuration")
+        repo = tracker.repo
+        if not repo.initialized or not repo.head():
+            return _ok(items=[])
+
+        def in_session(s) -> bool:
+            m = s.meta
+            return bool(m.sim_running or m.trigger == "sim_exit" or m.car or m.track)
+
+        chrono = list(reversed(repo.log()))  # oldest first
+        sessions: list[dict] = []
+        i, n = 0, len(chrono)
+        while i < n:
+            if not in_session(chrono[i]):
+                i += 1
+                continue
+            car, track = chrono[i].meta.car, chrono[i].meta.track
+            baseline = chrono[i - 1].commit if i > 0 else None
+            group = []
+            j = i
+            while (j < n and in_session(chrono[j])
+                   and chrono[j].meta.car == car and chrono[j].meta.track == track):
+                group.append(chrono[j])
+                ended = chrono[j].meta.trigger == "sim_exit"
+                j += 1
+                if ended:
+                    break
+            files = sorted({f for g in group for f in g.meta.files if not is_sidecar(f)})
+            sessions.append({
+                "car": car, "track": track,
+                "start": group[0].author_date, "end": group[-1].author_date,
+                "baselineRev": baseline, "endRev": group[-1].commit,
+                "count": len(group), "files": files,
+            })
+            i = j
+        sessions.reverse()  # newest first
+        return _ok(items=sessions)
+
     def export_backup(self, rev: str) -> dict:
         tracker = self._tracker()
         if tracker is None:
