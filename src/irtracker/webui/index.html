@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>iRacing Config Tracker</title>
   <link rel="icon" type="image/png" href="__LOGO_URI__">
+  <script>
+    /* Apply the saved theme before first paint so there's no flash. */
+    try { if (localStorage.getItem("irtrack-theme") === "light")
+      document.documentElement.setAttribute("data-theme", "light"); } catch (e) {}
+  </script>
   <style>/*__STYLES__*/</style>
 </head>
 <body>
@@ -28,6 +33,7 @@
         <span class="brand-name">iRacing Config Tracker</span>
       </div>
       <div class="topbar-spacer"></div>
+      <button class="icon-btn" id="themeToggle" title="Switch theme" aria-label="Switch light / dark theme"></button>
       <div class="sim-chip" id="simChip" title="Whether iRacing is currently running"></div>
       <button class="btn btn-primary" id="backupBtn">
         <svg viewBox="0 0 24 24" class="ico"><path d="M5 4h11l3 3v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M8 4v5h7"/><path d="M8 14h8"/></svg>

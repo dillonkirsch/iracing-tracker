@@ -105,6 +105,10 @@ const ICONS = {
   zip: '<path d="M6 2h12v20H6z"/><path d="M10 2v3M10 7v2M10 11v2M10 15h2v3h-2z"/>',
   bookmark: '<path d="M6 3h12v18l-6-4-6 4z"/>',
   rotate: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.4 1.4M17.6 17.6L19 19M19 5l-1.4 1.4M6.4 17.6L5 19"/>',
+  moon: '<path d="M21 12.8A8 8 0 1 1 11.2 3a6 6 0 0 0 9.8 9.8z"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
+  timeline: '<path d="M5 4v16"/><circle cx="5" cy="8" r="2"/><circle cx="5" cy="16" r="2"/><path d="M9 8h11M9 16h11"/>',
 };
 function fileIconName(name) {
   const base = keyBase(name);
@@ -248,6 +252,7 @@ const state = {
   showUnbound: false,
   settings: null,
   settingsQuery: "",
+  historyView: "list",  // "list" | "timeline"
 };
 
 /* --------------------------------------------------------------- data loads */
@@ -463,20 +468,118 @@ async function renderHistory() {
     return;
   }
 
+  const tl = state.historyView === "timeline";
+  const seg = `<div class="seg">
+    <button class="${tl ? "" : "on"}" data-action="hview-list">${icon("list")} List</button>
+    <button class="${tl ? "on" : ""}" data-action="hview-timeline">${icon("timeline")} Timeline</button>
+  </div>`;
   content.innerHTML = `
     <div class="page-head spread">
       <div><h1 class="page-title">Backup History</h1>
       <p class="page-sub">Every saved version of your settings. Click one to see what changed or to restore it.</p></div>
-      <button class="btn btn-sm" data-action="compare-now">${icon("rotate")} What’s changed since last backup?</button>
+      <div class="row-gap">${seg}
+        <button class="btn btn-sm" data-action="compare-now">${icon("rotate")} What’s changed?</button></div>
     </div>
-    ${compareCard()}
-    <input class="search" id="histSearch" placeholder="Filter by car, track, file, or words in the note…">
-    <div class="timeline" id="timeline"></div>`;
-
-  $("#histSearch").addEventListener("input", (e) => renderTimeline(e.target.value));
-  renderTimeline("");
+    ${tl ? "" : compareCard()}
+    <div id="histBody"></div>`;
+  renderHistBody();
   if (state.selectedRev) showBackupDetail(state.selectedRev);
   else asideHint("Select a backup to see what changed and restore it.");
+}
+
+function renderHistBody() {
+  const box = $("#histBody");
+  if (!box) return;
+  if (state.historyView === "timeline") {
+    box.innerHTML = timelineChartHtml();
+    box.querySelectorAll(".tlc-evt").forEach((el) =>
+      el.addEventListener("click", () => {
+        state.selectedRev = el.dataset.rev; renderHistBody(); showBackupDetail(el.dataset.rev);
+      }));
+    return;
+  }
+  box.innerHTML = `<input class="search" id="histSearch" placeholder="Filter by car, track, file, or words in the note…">
+    <div class="timeline" id="timeline"></div>`;
+  $("#histSearch").addEventListener("input", (e) => renderTimeline(e.target.value));
+  renderTimeline("");
+}
+
+/* ---- configuration timeline (chart) ---- */
+function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
+function timeOnly(iso) {
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+function dayLabelShort(d) { return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
+function dayLabelLong(iso) {
+  const d = new Date(iso), now = new Date();
+  if (startOfDay(d).getTime() === startOfDay(now).getTime()) return "Today";
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  if (startOfDay(d).getTime() === startOfDay(y).getTime()) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+function eventKind(s) {
+  if (s.knownGood) return { key: "known", label: "Known-good", color: "var(--good)", icon: "shieldCheck" };
+  if (s.tags && s.tags.length) return { key: "setup", label: "Saved Setup", color: "var(--bind-button)", icon: "bookmark" };
+  if (s.trigger === "restore" || s.trigger === "pre_restore") return { key: "restore", label: "Restore", color: "var(--warn)", icon: "rotate" };
+  if (s.trigger === "manual") return { key: "manual", label: "Manual backup", color: "var(--accent)", icon: "shield" };
+  if (s.trigger === "sim_exit") return { key: "session", label: "After a session", color: "var(--bind-axis)", icon: "clock" };
+  return { key: "auto", label: "Auto backup", color: "var(--text-faint)", icon: "clock" };
+}
+function tlcSummary(s) {
+  if (s.message) return esc(s.message);
+  const labels = [...new Set(Object.keys(s.files || {}).map(fileLabel))];
+  if (!labels.length) return "no file changes";
+  return esc(labels.slice(0, 2).join(", ")) + (labels.length > 2 ? ` +${labels.length - 2} more` : "");
+}
+function timelineEventHtml(s) {
+  const k = eventKind(s);
+  return `<div class="tlc-evt ${s.rev === state.selectedRev ? "selected" : ""}" data-rev="${esc(s.rev)}">
+    <div class="tlc-evt-dot" style="background:${k.color}"></div>
+    <div class="tlc-evt-time">${esc(timeOnly(s.date))}</div>
+    <div style="flex:1">
+      <div class="tlc-evt-type" style="color:${k.color}">${icon(k.icon)} ${esc(k.label)}</div>
+      <div class="tlc-evt-sum">${tlcSummary(s)}</div>
+    </div></div>`;
+}
+function timelineChartHtml() {
+  const items = state.history;  // newest first
+  if (!items.length) return `<p class="muted">No backups yet.</p>`;
+  const byDay = new Map();
+  items.forEach((s) => {
+    const t = startOfDay(new Date(s.date)).getTime();
+    if (!byDay.has(t)) byDay.set(t, []);
+    byDay.get(t).push(s);
+  });
+  const dayMs = 86400000;
+  const first = startOfDay(new Date(items[items.length - 1].date)).getTime();
+  const today = startOfDay(new Date()).getTime();
+  const spanDays = Math.max(1, Math.round((today - first) / dayMs) + 1);
+  const N = Math.min(21, Math.max(7, spanDays));  // always show at least a week
+  const counts = [];
+  for (let i = N - 1; i >= 0; i--) {
+    const t = today - i * dayMs;
+    counts.push({ t, c: (byDay.get(t) || []).length });
+  }
+  const max = Math.max(1, ...counts.map((d) => d.c));
+  const bars = counts.map((d) =>
+    `<div class="tlc-bar ${d.c ? "" : "empty"}" title="${esc(dayLabelShort(new Date(d.t)))}: ${d.c} backup${d.c === 1 ? "" : "s"}"><i style="height:${d.c ? Math.round(d.c / max * 100) : 0}%"></i></div>`).join("");
+  const axis = `<span>${esc(dayLabelShort(new Date(counts[0].t)))}</span><span>${esc(dayLabelShort(new Date(counts[counts.length - 1].t)))}</span>`;
+  const kinds = {};
+  items.forEach((s) => { const k = eventKind(s); kinds[k.key] = k; });
+  const legend = Object.values(kinds).map((k) =>
+    `<span class="tlc-leg"><i style="background:${k.color}"></i>${esc(k.label)}</span>`).join("");
+  let events = "";
+  for (const [, dayItems] of byDay) {
+    events += `<div class="tlc-day"><span class="tlc-day-label">${esc(dayLabelLong(dayItems[0].date))}</span><span class="muted" style="font-size:12px">${dayItems.length} event${dayItems.length === 1 ? "" : "s"}</span></div>`;
+    events += `<div class="tlc-events-day">${dayItems.map(timelineEventHtml).join("")}</div>`;
+  }
+  return `
+    <p class="tlc-summary"><b>${items.length}</b> backup${items.length === 1 ? "" : "s"} over <b>${spanDays}</b> day${spanDays === 1 ? "" : "s"}.</p>
+    <div class="card"><p class="section-label mt-0">Backup activity (last ${N} days)</p>
+      <div class="tlc-bars">${bars}</div><div class="tlc-axis">${axis}</div></div>
+    <div class="tlc-legend">${legend}</div>
+    <div>${events}</div>`;
 }
 
 function renderTimeline(q) {
@@ -1395,6 +1498,8 @@ document.addEventListener("click", (e) => {
   if (a === "backup") return doBackup();
   if (a === "goto-history" || a === "view-pending") { setView("history"); if (a === "view-pending") setTimeout(compareNow, 50); return; }
   if (a === "compare-now") return compareNow();
+  if (a === "hview-list") { state.historyView = "list"; return renderHistory(); }
+  if (a === "hview-timeline") { state.historyView = "timeline"; return renderHistory(); }
   if (a === "goto-settings") return setView("settings");
   if (a === "open-iracing") return api("open_folder", "iracing");
   if (a === "open-data") return api("open_folder", "data");
@@ -1438,6 +1543,23 @@ document.querySelectorAll(".nav-item").forEach((b) =>
 
 $("#backupBtn").addEventListener("click", doBackup);
 $("#navToggle").addEventListener("click", () => $("#layout").classList.toggle("nav-collapsed"));
+
+/* --------------------------------------------------------------- theme */
+function applyTheme(theme) {
+  const light = theme === "light";
+  document.documentElement.setAttribute("data-theme", light ? "light" : "dark");
+  try { localStorage.setItem("irtrack-theme", light ? "light" : "dark"); } catch (e) {}
+  const btn = $("#themeToggle");
+  if (btn) {
+    btn.innerHTML = light ? icon("moon") : icon("sun");
+    btn.title = light ? "Switch to dark mode" : "Switch to light mode";
+  }
+}
+function toggleTheme() {
+  applyTheme(document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light");
+}
+applyTheme(document.documentElement.getAttribute("data-theme") || "dark");
+$("#themeToggle").addEventListener("click", toggleTheme);
 
 /* --------------------------------------------------------------- bootstrap */
 function hideBootScreen() {
