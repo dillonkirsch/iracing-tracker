@@ -1262,6 +1262,7 @@ function renderSettings() {
 
   const wRunning = !!(o.watcher && o.watcher.running);
   const wPaused = !!(o.watcher && o.watcher.paused);
+  state.trackedEdit = (o.tracked || []).map((t) => ({ ...t }));  // fresh working copy
 
   content.innerHTML = `
     <div class="page-head spread"><div><h1 class="page-title">Settings</h1>
@@ -1307,11 +1308,19 @@ function renderSettings() {
 
     <p class="section-label" style="margin-top:22px">Files being protected</p>
     <div class="card">
-      ${o.protected.map((p) => `<div class="file-row">
-        <div class="file-ico">${icon(fileIconName(p.pattern.replace("*", "")))}</div>
-        <div><div class="file-name">${esc(fileLabel(p.pattern.replace("rendererDX11*.ini", "rendererDX11Monitor.ini")))}</div>
-          <div class="file-desc">${esc(p.pattern)} — ${esc(POLICY_LABELS[p.policy] || p.policy)}</div></div>
-      </div>`).join("")}
+      <p class="muted mt-0" style="font-size:12.5px">Choose which iRacing files this app backs up. “Don’t track” stops backing a file up; “group repeats” squashes rapid repeated tweaks into one history entry. Applies to new backups — restart auto-backup (toggle above) to update the background watcher.</p>
+      <div id="trackedEditor" style="margin-top:8px"></div>
+      <div class="row-gap" style="margin-top:12px">
+        <input class="search" id="newPattern" style="margin-bottom:0;flex:1;min-width:150px" placeholder="Add a file, e.g. replay.ini">
+        <select class="search" id="newPolicy" style="margin-bottom:0;max-width:175px">
+          <option value="track">Track every change</option>
+          <option value="track-collapsed">Track, group repeats</option>
+        </select>
+        <button class="btn btn-sm" data-action="tracked-add">${icon("doc")} Add</button>
+      </div>
+      <div class="row-gap" style="margin-top:14px">
+        <button class="btn btn-primary btn-sm" data-action="tracked-save">${icon("shieldCheck")} Save tracked files</button>
+      </div>
     </div>
 
     <p class="section-label" style="margin-top:22px">Folders</p>
@@ -1341,6 +1350,51 @@ function renderSettings() {
   $("#tgWatch").addEventListener("change", onToggleWatch);
   $("#tgAutostart").addEventListener("change", onToggleAutostart);
   $("#tgTray").addEventListener("change", onToggleTray);
+  renderTrackedEditor();
+}
+
+function renderTrackedEditor() {
+  const box = $("#trackedEditor");
+  if (!box) return;
+  const items = state.trackedEdit || [];
+  box.innerHTML = items.map((t, i) => `
+    <div class="file-row">
+      <div class="file-ico">${icon(fileIconName(t.pattern.replace("*", "")))}</div>
+      <div style="flex:1"><div class="file-name">${esc(fileLabel(t.pattern.replace("rendererDX11*.ini", "rendererDX11Monitor.ini")))}</div>
+        <div class="file-desc">${esc(t.pattern)}</div></div>
+      <select class="search" data-track-i="${i}" style="margin:0;max-width:170px">
+        <option value="track" ${t.policy === "track" ? "selected" : ""}>Track every change</option>
+        <option value="track-collapsed" ${t.policy === "track-collapsed" ? "selected" : ""}>Track, group repeats</option>
+        <option value="ignore" ${t.policy === "ignore" ? "selected" : ""}>Don’t track</option>
+      </select>
+      <button class="btn btn-sm btn-ghost" data-action="tracked-remove" data-i="${i}" title="Remove from the list">✕</button>
+    </div>`).join("");
+  box.querySelectorAll("select[data-track-i]").forEach((sel) =>
+    sel.addEventListener("change", (e) => { state.trackedEdit[+e.target.dataset.trackI].policy = e.target.value; }));
+}
+
+function doTrackedAdd() {
+  const pat = (($("#newPattern") || {}).value || "").trim();
+  const pol = ($("#newPolicy") || {}).value || "track";
+  if (!pat) { toast("Type a file name or pattern to add.", "bad"); return; }
+  if ((state.trackedEdit || []).some((t) => t.pattern.toLowerCase() === pat.toLowerCase())) {
+    toast("That file is already in the list.", "bad"); return;
+  }
+  state.trackedEdit.push({ pattern: pat, policy: pol });
+  $("#newPattern").value = "";
+  renderTrackedEditor();
+}
+
+function doTrackedRemove(i) {
+  state.trackedEdit.splice(i, 1);
+  renderTrackedEditor();
+}
+
+async function doTrackedSave() {
+  const r = await api("set_tracked", state.trackedEdit || []);
+  if (!r.ok) { toast(r.error, "bad"); return; }
+  toast(r.message || "Saved.", "good");
+  await refreshAll();
 }
 
 async function onToggleTray(e) {
@@ -1695,6 +1749,9 @@ document.addEventListener("click", (e) => {
   if (a === "browse-iracing") return doBrowse("setIracing");
   if (a === "browse-data") return doBrowse("setData");
   if (a === "save-settings") return doSaveSettings();
+  if (a === "tracked-add") return doTrackedAdd();
+  if (a === "tracked-remove") return doTrackedRemove(+btn.dataset.i);
+  if (a === "tracked-save") return doTrackedSave();
   if (a === "binding-inventory") return doBindingInventory();
   if (a === "copy-inventory") return copyInventory();
   if (a === "blame-control") return doBlameControl(btn.dataset.name);

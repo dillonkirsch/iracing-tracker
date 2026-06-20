@@ -319,6 +319,30 @@ def test_tray_setting_persists(tmp_path):
     assert GuiApi(str(cfgp)).get_overview()["trayEnabled"] is False
 
 
+def test_set_tracked_persists_and_keeps_ignore_keys(tmp_path):
+    from irtracker.gui import GuiApi
+    from irtracker.config import load_config
+    ira = tmp_path / "iRacing"; ira.mkdir()
+    cfgp = tmp_path / "config.toml"  # no [[tracked]] -> load uses the defaults
+    cfgp.write_text(f'[paths]\niracing_dir = "{ira.as_posix()}"\n'
+                    f'data_dir = "{(tmp_path / "data").as_posix()}"\n', encoding="utf-8")
+    api = GuiApi(str(cfgp))
+    items = [dict(t) for t in api.get_overview()["tracked"]]
+    for t in items:
+        if t["pattern"] == "app.ini":
+            t["policy"] = "ignore"           # stop tracking app.ini
+    items.append({"pattern": "replay.ini", "policy": "track-collapsed"})  # add a file
+    assert api.set_tracked(items)["ok"]
+
+    cfg = load_config(cfgp)                   # fresh load reflects the write
+    by = {tp.pattern: tp for tp in cfg.tracked}
+    assert by["app.ini"].policy == "ignore"
+    assert by["replay.ini"].policy == "track-collapsed"
+    assert len(by["rendererDX11*.ini"].ignore_keys) >= 1   # ignore_keys preserved
+    assert "[paths]" in cfgp.read_text(encoding="utf-8")    # other sections survive
+    assert not GuiApi(str(cfgp)).set_tracked([])["ok"]      # empty list refused
+
+
 def test_migrates_legacy_bare_keys_into_active_profile(cfg, corpus_cfg_bytes):
     # 1) legacy install: controls.cfg at the top level, no profiles yet
     (cfg.iracing_dir / "controls.cfg").write_bytes(corpus_cfg_bytes)

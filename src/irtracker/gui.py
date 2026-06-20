@@ -29,7 +29,8 @@ from pathlib import Path
 from typing import Any
 
 from irtracker.config import (
-    SIDECAR_NAME, Config, active_control_profile, config_path, is_sidecar, load_config)
+    SIDECAR_NAME, Config, TrackedPattern, active_control_profile, config_path,
+    is_sidecar, load_config)
 from irtracker.gfcc import codec
 from irtracker.gfcc.codec import GfccError
 from irtracker.gfcc.patch import remap_device, remap_joycalib
@@ -95,6 +96,33 @@ def _update_config_paths(text: str, iracing_dir: str, data_dir: str) -> str:
         else:
             text = f"[paths]\n{line}\n" + text
     return text
+
+
+def _toml_str(s: str) -> str:
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _render_tracked_block(tp) -> str:
+    out = (f"[[tracked]]\npattern = {_toml_str(tp.pattern)}\n"
+           f"policy = {_toml_str(tp.policy)}\n")
+    if tp.ignore_keys:
+        keys = ", ".join(_toml_str(k) for k in tp.ignore_keys)
+        out += f"ignore_keys = [{keys}]\n"
+    return out
+
+
+def _set_tracked_in_text(text: str, tracked: list) -> str:
+    """Replace all [[tracked]] blocks in a config.toml with regenerated ones,
+    preserving everything before the first [[tracked]] (so [paths]/[watcher] and
+    their comments survive). Each block keeps its ignore_keys."""
+    head: list[str] = []
+    for line in text.splitlines():
+        if line.strip() == "[[tracked]]":
+            break
+        head.append(line)
+    head_text = "\n".join(head).rstrip("\n")
+    blocks = "\n".join(_render_tracked_block(tp) for tp in tracked)
+    return f"{head_text}\n\n{blocks}"
 
 
 def _bits(value: int) -> list[int]:
@@ -227,6 +255,7 @@ class GuiApi:
         for tp in cfg.tracked:
             if tp.policy != "ignore":
                 protected.append({"pattern": tp.pattern, "policy": tp.policy})
+        tracked = [{"pattern": tp.pattern, "policy": tp.policy} for tp in cfg.tracked]
 
         return _ok(
             configPath=str(self._config_arg or config_path()),
@@ -243,6 +272,7 @@ class GuiApi:
             latest=latest,
             pending=pending,
             lastKnownGood=last_known_good,
+            tracked=tracked,
             snapshotCount=snapshot_count,
             protected=protected,
             trayEnabled=bool(self._ui_prefs(cfg).get("tray", True)),
@@ -1325,6 +1355,40 @@ class GuiApi:
             msg += " Your existing backups were moved to the new folder."
         return _ok(message=msg, moved=moved,
                    iracingDir=str(new_ira), dataDir=str(new_data))
+
+    def set_tracked(self, items: list | None = None) -> dict:
+        """Replace which files are tracked (and their policy) from the GUI,
+        persisting to config.toml. Existing per-pattern ignore_keys are kept."""
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        valid = {"track", "track-collapsed", "ignore"}
+        existing = {tp.pattern: tp for tp in cfg.tracked}
+        new_list, seen = [], set()
+        for it in items or []:
+            pattern = (it.get("pattern") or "").strip()
+            policy = (it.get("policy") or "track").strip()
+            if not pattern or pattern.lower() in seen:
+                continue
+            if policy not in valid:
+                return _err(f"Unknown tracking option {policy!r}.")
+            seen.add(pattern.lower())
+            keys = existing[pattern].ignore_keys if pattern in existing else []
+            new_list.append(TrackedPattern(pattern=pattern, policy=policy, ignore_keys=keys))
+        if not new_list:
+            return _err("Keep at least one file in the list.")
+
+        path = Path(self._config_arg) if self._config_arg else config_path()
+        try:
+            existing_text = path.read_text(encoding="utf-8-sig") if path.exists() else "[paths]\n"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_set_tracked_in_text(existing_text, new_list), encoding="utf-8")
+        except OSError as exc:
+            return _err(f"Couldn't save the settings file: {exc}")
+
+        self._cfg = None  # force reload with the new tracked set
+        self._cfg_error = None
+        return _ok(message="Saved which files are backed up.")
 
     def open_folder(self, which: str) -> dict:
         cfg = self._config()
