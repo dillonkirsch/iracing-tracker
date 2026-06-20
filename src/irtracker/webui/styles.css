@@ -280,6 +280,9 @@ body {
 .tl-date { color: var(--text-faint); font-size: 12.5px; margin-left: auto; }
 .tl-ctx { color: var(--text-dim); font-size: 12.5px; margin-top: 4px; }
 .tl-msg { color: var(--text-dim); font-style: italic; font-size: 12.5px; margin-top: 4px; }
+.tl-note { color: var(--text); font-size: 12.5px; margin-top: 6px; display: flex; gap: 6px;
+  align-items: flex-start; background: var(--accent-soft); border-radius: 6px; padding: 6px 9px; }
+.tl-note .ico { width: 14px; height: 14px; flex: none; margin-top: 1px; color: var(--accent); }
 .tl-files { margin-top: 9px; }
 
 /* ---- diff view ---- */

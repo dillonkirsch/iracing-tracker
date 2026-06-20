@@ -24,6 +24,8 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 | **Auto-update** | The packaged app checks GitHub Releases on startup and from Settings; one click downloads the new `.exe`, checksum-verifies it, swaps it in place, and relaunches. Shows a banner on Home when a newer build is available. |
 | **Reverse input lookup ("what does this do?")** | In Controls & Devices, press a key in the capture box (or type "Btn 5" / "Axis 3" / "Alt+P") to see which action(s) it's bound to — or "free". Also `gfcc whatis "<input>"` on the CLI. |
 | **First-run wizard** | On first launch (no backups yet) a friendly multi-step overlay walks new users through: welcome → confirm the iRacing folder → make the first backup → optionally enable auto-backup → done. Re-openable from Settings ("Run setup wizard"); an `onboarded` flag stops it reappearing. |
+| **Config linter / sanity check** | A "things worth a look" card in Game Settings that flags risky config — advisory and conservative, each finding explains *why*. Rules: `maxWorkingSetMB*` set above your installed RAM (psutil), plus consolidated binding conflicts and disconnected/moved-USB devices. Pure rule table in `lint.py` (easy to extend) + `GuiApi.run_config_lint`. |
+| **Snapshot notes / annotations** | Attach a free-text note to any backup (a tuning journal) from its detail panel — shown inline in history and the note text is searchable. Stored in a `state/notes.json` sidecar keyed by commit; `GuiApi.set_note` / surfaced via `get_history`. |
 | **Session change report** | A "Sessions" tab in Backup History groups backups into driving sessions (a run of sim-involved snapshots sharing a car/track, ended by sim exit) using the captured car/track/trigger. Each session card shows car @ track, time range, and backup count; expand it for a before-vs-after semantic diff of exactly what you changed that session (reuses the compare engine). `GuiApi.list_sessions`. |
 | **Binding inventory** | A "Inventory" button in Controls & Devices opens a clean, human-readable list of every assignment grouped by device (each wheel/pedal, then Keyboard), profile-aware, with a one-click **Copy** (plain text) for pasting into Discord/forums. Built client-side from the decoded bindings. |
 | **Configuration timeline (chart)** | A high-level chronological view in Backup History (List ⇄ Timeline toggle): a backup-activity bar chart (per day, last 1–3 weeks) + a color-coded, day-grouped event spine — Known-good / Saved Setup / Restore / Manual backup / After-a-session / Auto backup, each with a colored dot, time, and summary; click an event for its detail. Pure view over the existing history. |
@@ -50,7 +52,6 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 | Feature | Value | Effort | Foundation / notes |
 |---|---|---|---|
 | **Configuration history search** — find every snapshot where a key/section/action/value changed. | Med | Medium | Same history-walk machinery as blame. |
-| **Snapshot notes / annotations** — attach searchable notes to any snapshot after the fact (turns it into a tuning journal). | High | Medium | Store via git notes or a sidecar; surface in history. |
 | **Automatic iRacing build-upgrade detection** — record the active build per snapshot; auto-annotate + summarise what the seasonal update changed. | High | Med–Hard | Need a reliable source for the build version (file/registry — TBD). Great for "did I break it or did iRacing?". |
 | **Session outcome linking** — poll incidents / best lap at sim exit and store with the snapshot ("FFB I used for my Spa PB"). | Med | Medium | Already poll pyirsdk for car/track (FR-6); extend to results. |
 
@@ -60,7 +61,6 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 
 | Feature | Value | Effort | Foundation / notes |
 |---|---|---|---|
-| **Config linter / sanity checker** — warn on out-of-bounds INI values (e.g. `maxWorkingSetMB_64` > physical RAM, stale VR keys) that cause stutter/crashes. | High | Medium | Needs a small rules table + system info (RAM). |
 | **Orphaned-file cleanup** — detect files in `Documents\iRacing` no longer used by the current build / uninstalled content. | Low–Med | Medium | Hard to know "unused" reliably. |
 
 ---

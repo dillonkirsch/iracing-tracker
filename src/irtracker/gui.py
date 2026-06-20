@@ -265,7 +265,11 @@ class GuiApi:
             tag_only=bool(f.get("tagsOnly")),
             limit=int(f["limit"]) if f.get("limit") else None,
         )
-        return _ok(items=[self._snap_dict(s) for s in snaps])
+        notes = self._load_notes(tracker.cfg)
+        items = [self._snap_dict(s) for s in snaps]
+        for it in items:
+            it["note"] = notes.get(it["rev"], "")
+        return _ok(items=items)
 
     def get_changes(self, rev: str) -> dict:
         """What a single backup changed, compared with the one before it."""
@@ -1112,6 +1116,115 @@ class GuiApi:
         return _ok(fails=fails, warns=warns,
                    checks=[{"name": c.name, "status": c.status, "detail": c.detail}
                            for c in checks])
+
+    def run_config_lint(self) -> dict:
+        """Sanity-check the live config: risky INI values, binding conflicts,
+        and disconnected devices. Advisory, not authoritative."""
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        from irtracker import lint
+        from irtracker.semdiff import parse_ini
+
+        ram_mb = None
+        try:
+            import psutil
+            ram_mb = int(psutil.virtual_memory().total // (1024 * 1024))
+        except Exception:
+            pass
+
+        parsed = {}
+        for name in cfg.tracked_files_present():
+            if name.lower().endswith(".ini"):
+                try:
+                    parsed[name] = parse_ini(
+                        cfg.live_path(name).read_text(encoding="utf-8", errors="replace"))
+                except OSError:
+                    pass
+        findings = [{"severity": f.severity, "title": f.title,
+                     "detail": f.detail, "where": f.where}
+                    for f in lint.lint_ini(parsed, ram_mb)]
+
+        controls = cfg.live_path("controls.cfg")
+        doc = None
+        if controls.exists():
+            try:
+                doc = codec.decode_bytes(controls.read_bytes())
+            except (OSError, GfccError):
+                doc = None
+        if doc is not None:
+            from irtracker.gfcc.analyze import find_binding_conflicts
+            conflicts = find_binding_conflicts(doc)
+            if conflicts:
+                shown = "; ".join(f"{c.label} ({len(c.actions)} actions)" for c in conflicts[:3])
+                findings.append({
+                    "severity": "warn",
+                    "title": f"{len(conflicts)} binding conflict{'s' if len(conflicts) > 1 else ''}",
+                    "detail": f"An input is assigned to multiple actions: {shown}"
+                              f"{' …' if len(conflicts) > 3 else ''}. "
+                              f"Open Controls & Devices to sort it out.",
+                    "where": "Controls"})
+            try:
+                from irtracker.gfcc.devices import build_report
+                jc = cfg.live_path("joyCalib.yaml")
+                report = build_report(doc, jc.read_text(encoding="utf-8", errors="replace")
+                                      if jc.exists() else None)
+                connected = {d.instance_guid for d in report.connected}
+                products = {d.product_guid for d in report.connected if d.product_guid}
+                moved = [d for d in report.referenced
+                         if d.instance_guid not in connected and d.product_guid in products]
+                missing = [d for d in report.referenced
+                           if d.instance_guid not in connected and d.product_guid not in products]
+                if moved:
+                    findings.append({"severity": "info",
+                        "title": f"{len(moved)} device on a different USB port",
+                        "detail": "A device used by your controls is connected under a new ID "
+                                  "(often a different USB port). Controls & Devices offers a "
+                                  "one-click re-map so your bindings keep working.",
+                        "where": "Devices"})
+                if missing:
+                    findings.append({"severity": "warn",
+                        "title": f"{len(missing)} device not connected",
+                        "detail": "A device your controls rely on isn't plugged in right now. "
+                                  "Its bindings won't work until it's reconnected.",
+                        "where": "Devices"})
+            except Exception:
+                pass
+        return _ok(findings=findings, ramMb=ram_mb)
+
+    # -- snapshot notes (a tuning journal; sidecar keyed by commit) -------------
+
+    def _notes_path(self, cfg) -> Path:
+        return cfg.state_dir / "notes.json"
+
+    def _load_notes(self, cfg) -> dict:
+        try:
+            return json.loads(self._notes_path(cfg).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def set_note(self, rev: str, text: str) -> dict:
+        tracker = self._tracker()
+        if tracker is None:
+            return _err(self._cfg_error or "could not load configuration")
+        try:
+            sha = tracker.repo.resolve(rev)
+        except Exception as exc:
+            return _err(str(exc))
+        cfg = tracker.cfg
+        notes = self._load_notes(cfg)
+        clean = (text or "").strip()
+        if clean:
+            notes[sha] = clean
+        else:
+            notes.pop(sha, None)
+        try:
+            cfg.state_dir.mkdir(parents=True, exist_ok=True)
+            self._notes_path(cfg).write_text(
+                json.dumps(notes, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            return _err(str(exc))
+        return _ok(note=clean)
 
     def check_for_update(self) -> dict:
         from irtracker import updater

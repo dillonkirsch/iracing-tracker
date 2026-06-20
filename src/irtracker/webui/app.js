@@ -222,6 +222,39 @@ function infoModal({ title, bodyHtml }) {
   root.querySelector(".modal-bg").onclick = (e) => { if (e.target.classList.contains("modal-bg")) done(); };
 }
 
+function noteModal(current) {
+  return new Promise((resolve) => {
+    const root = $("#modalRoot");
+    root.innerHTML = `
+      <div class="modal-bg"><div class="modal">
+        <h3>Note for this backup</h3>
+        <p>Jot down what you changed or how it felt — your tuning journal. It's searchable in Backup History.</p>
+        <textarea class="modal-input" id="noteText" rows="4" style="resize:vertical;min-height:92px;font-family:inherit">${esc(current || "")}</textarea>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" data-act="cancel">Cancel</button>
+          <button class="btn btn-primary" data-act="ok">Save note</button>
+        </div>
+      </div></div>`;
+    const ta = root.querySelector("#noteText"); ta.focus();
+    const done = (v) => { root.innerHTML = ""; resolve(v); };
+    root.querySelector('[data-act="cancel"]').onclick = () => done(null);
+    root.querySelector('[data-act="ok"]').onclick = () => done(ta.value);
+    root.querySelector(".modal-bg").onclick = (e) => { if (e.target.classList.contains("modal-bg")) done(null); };
+  });
+}
+
+async function doEditNote(rev) {
+  const s = state.history.find((x) => x.rev === rev);
+  const text = await noteModal(s ? s.note : "");
+  if (text === null) return;  // cancelled
+  const r = await api("set_note", rev, text);
+  if (!r.ok) { toast(r.error, "bad"); return; }
+  if (s) s.note = r.note;
+  toast(r.note ? "Note saved." : "Note removed.", "good");
+  showBackupDetail(rev);
+  renderHistBody();
+}
+
 function colorizeDiff(text) {
   return esc(text).split("\n").map((line) => {
     const t = line.trimStart();
@@ -363,10 +396,11 @@ function backupSummary(s) {
   const ctx = s.contextLabel && s.contextLabel !== "manual edit"
     ? `<div class="tl-ctx">${icon("clock")} ${esc(s.contextLabel)}</div>` : "";
   const msg = s.message ? `<div class="tl-msg">“${esc(s.message)}”</div>` : "";
+  const note = s.note ? `<div class="tl-note">${icon("doc")} ${esc(s.note)}</div>` : "";
   const tags = knownGoodChip(s) + (s.tags || []).map((t) => `<span class="chip tag-chip">${icon("bookmark")}${esc(t)}</span>`).join("");
   return `<div class="tl-top"><span class="tl-reason">${esc(triggerLabel(s.trigger))}</span>
       <span class="tl-date">${esc(fmtDate(s.date))}</span></div>
-    ${ctx}${msg}
+    ${ctx}${msg}${note}
     <div class="tl-files">${fileChips(s.files)}${tags}</div>`;
 }
 
@@ -588,7 +622,7 @@ function renderTimeline(q) {
   q = (q || "").toLowerCase();
   const items = state.history.filter((s) => {
     if (!q) return true;
-    const hay = [s.message, s.car, s.track, triggerLabel(s.trigger),
+    const hay = [s.message, s.note, s.car, s.track, triggerLabel(s.trigger),
       ...Object.keys(s.files).map(fileLabel), ...Object.keys(s.files), ...s.tags].join(" ").toLowerCase();
     return hay.includes(q);
   });
@@ -624,6 +658,12 @@ async function showBackupDetail(rev) {
     <div class="row-gap" style="margin-top:12px">
       <button class="btn btn-sm" data-action="bookmark" data-rev="${esc(rev)}">${icon("bookmark")} Save as setup</button>
       <button class="btn btn-sm" data-action="export" data-rev="${esc(rev)}">${icon("zip")} Export…</button>
+    </div>
+    <p class="section-label" style="margin-top:18px">${icon("doc")} Your note</p>
+    <div class="card" style="padding:12px 14px">
+      ${s.note ? `<div style="white-space:pre-wrap;font-size:13px;line-height:1.5">${esc(s.note)}</div>`
+               : `<span class="muted" style="font-size:12.5px">No note yet — jot down what you changed or how it felt.</span>`}
+      <button class="btn btn-sm btn-ghost" style="margin-top:9px" data-action="edit-note" data-rev="${esc(rev)}">${icon("doc")} ${s.note ? "Edit note" : "Add a note"}</button>
     </div>
     <p class="section-label" style="margin-top:18px">What changed in this backup</p>
     <div id="changeBody"><div class="loading">Comparing…</div></div>
@@ -1069,15 +1109,33 @@ async function renderGameSettings() {
       <p>${esc((s && s.error) || "Couldn’t read your settings files.")}</p></div>`;
     return;
   }
+  const lint = await api("run_config_lint");
   content.innerHTML = `
     <div class="page-head"><h1 class="page-title">Game Settings</h1>
       <p class="page-sub">Your iRacing config values. Search a setting and click it to see when it last changed. Read-only — change these inside iRacing.</p></div>
+    ${lintCard(lint)}
     <input class="search" id="setSearch" placeholder="Find a setting (e.g. memory, FOV, mirror, fps)…" value="${esc(state.settingsQuery || "")}">
     <div id="setResults"></div>`;
   const inp = $("#setSearch");
   inp.addEventListener("input", (e) => { state.settingsQuery = e.target.value; renderSettingsRows(); });
   renderSettingsRows();
   inp.focus();
+}
+
+function lintCard(lint) {
+  if (!lint || !lint.ok) return "";
+  const f = lint.findings || [];
+  if (!f.length) {
+    return `<div class="card" style="margin-bottom:16px;padding:13px 16px">
+      <span class="muted" style="font-size:12.5px">${icon("shieldCheck")} Sanity check: no problems found in your settings.</span></div>`;
+  }
+  return `<div class="card conflict-banner" style="margin-bottom:16px">
+    <p class="section-label mt-0" style="color:var(--warn)">${icon("alert")} ${f.length} thing${f.length > 1 ? "s" : ""} worth a look</p>
+    ${f.map((x, i) => `<div style="padding:9px 0${i ? ";border-top:1px solid var(--line-soft)" : ""}">
+      <div style="font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:6px">${icon(x.severity === "warn" ? "alert" : "clock")} ${esc(x.title)}${x.where ? ` <span class="muted" style="font-weight:500">· ${esc(x.where)}</span>` : ""}</div>
+      <div class="muted" style="font-size:12.5px;margin-top:3px;line-height:1.5">${esc(x.detail)}</div>
+    </div>`).join("")}
+  </div>`;
 }
 
 function settingRow(it, withDate) {
@@ -1603,6 +1661,7 @@ document.addEventListener("click", (e) => {
   if (a === "open-config") return api("open_folder", "config");
   if (a === "restore-file") return doRestoreFile(rev, file);
   if (a === "bookmark") return doBookmark(rev);
+  if (a === "edit-note") return doEditNote(btn.dataset.rev);
   if (a === "export") return doExport(rev);
   if (a === "remap") return doRemap(btn.dataset.old, btn.dataset.new);
   if (a === "mark-known-good") return doMarkKnownGood();

@@ -264,6 +264,46 @@ def test_list_sessions_groups_driving_sessions(tmp_path):
     assert [f["name"] for f in cmp["files"]] == ["app.ini"]  # before->after diff
 
 
+def test_lint_ini_max_working_set_rule():
+    from irtracker.lint import lint_ini
+    parsed = {"app.ini": {"Graphics": {"maxWorkingSetMB_64": "1048576", "FOV": "90"}}}
+    fs = lint_ini(parsed, ram_mb=16384)            # cap above RAM -> warn
+    assert len(fs) == 1 and fs[0].severity == "warn" and "maxWorkingSetMB_64" in fs[0].title
+    assert lint_ini(parsed, ram_mb=2_000_000) == []  # cap below RAM -> fine
+    assert lint_ini(parsed, ram_mb=None) == []       # no RAM info -> no claim
+
+
+def test_run_config_lint_flags_high_memory(tmp_path):
+    from irtracker.gui import GuiApi
+    ira = tmp_path / "iRacing"; ira.mkdir()
+    (ira / "app.ini").write_text(
+        "[Graphics]\nmaxWorkingSetMB_64=1099511627776\n", encoding="utf-8")  # ~1 PB
+    cfgp = tmp_path / "config.toml"
+    cfgp.write_text(f'[paths]\niracing_dir = "{ira.as_posix()}"\n'
+                    f'data_dir = "{(tmp_path / "data").as_posix()}"\n', encoding="utf-8")
+    r = GuiApi(str(cfgp)).run_config_lint()
+    assert r["ok"]
+    assert any("higher than your installed RAM" in f["title"] for f in r["findings"])
+
+
+def test_snapshot_notes(tmp_path):
+    from irtracker.gui import GuiApi
+    ira = tmp_path / "iRacing"; ira.mkdir()
+    (ira / "app.ini").write_text("[A]\nx=1\n", encoding="utf-8")
+    cfgp = tmp_path / "config.toml"
+    cfgp.write_text(f'[paths]\niracing_dir = "{ira.as_posix()}"\n'
+                    f'data_dir = "{(tmp_path / "data").as_posix()}"\n'
+                    f'[watcher]\nsim_processes = ["___no_such_sim___.exe"]\n', encoding="utf-8")
+    api = GuiApi(str(cfgp))
+    api.backup_now("v1")
+    rev = api.get_history()["items"][0]["rev"]
+    assert api.get_history()["items"][0]["note"] == ""
+    assert api.set_note(rev, "  felt great at Spa  ")["note"] == "felt great at Spa"  # trimmed
+    assert api.get_history()["items"][0]["note"] == "felt great at Spa"
+    assert api.set_note(rev, "")["ok"]  # empty clears it
+    assert api.get_history()["items"][0]["note"] == ""
+
+
 def test_migrates_legacy_bare_keys_into_active_profile(cfg, corpus_cfg_bytes):
     # 1) legacy install: controls.cfg at the top level, no profiles yet
     (cfg.iracing_dir / "controls.cfg").write_bytes(corpus_cfg_bytes)

@@ -38,7 +38,7 @@ def _populate() -> str:
     (ira / "app.ini").write_text(
         "[ControlProfiles]\nGlobal=Baseline\n\n"
         "[Force Feedback]\nstrength=20.0\ndampingFactor=0.10\n\n"
-        "[Graphics]\nFieldOfView=90\nmaxWorkingSetMB_64=4096\nmirrorQuality=2\n",
+        "[Graphics]\nFieldOfView=90\nmaxWorkingSetMB_64=9999999\nmirrorQuality=2\n",
         encoding="utf-8")
     (ira / "core.ini").write_text("[Audio]\nmasterVolume=80\nengineVolume=65\n", encoding="utf-8")
     # Seed two control profiles so per-profile history/labels are exercised.
