@@ -28,6 +28,8 @@ Set-Content -Path "src/irtracker/_buildinfo.py" -Value 'VERSION = "v0.0.0-dev"' 
   --collect-all bottle `
   --collect-all proxy_tools `
   --collect-all fpdf `
+  --collect-all pystray `
+  --collect-all PIL `
   packaging\launcher.py
 
 Write-Host ""

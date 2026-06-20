@@ -21,8 +21,9 @@ dependencies = [
 sim = ["pyirsdk>=1.3"]
 toast = ["winotify>=1.1"]
 # Native app window for the GUI. Without it, `irtrack gui` falls back to the
-# browser, so this is optional.
-gui = ["pywebview>=5.0"]
+# browser, so this is optional. pystray/Pillow add the optional system-tray
+# icon; the app runs fine (no tray) without them.
+gui = ["pywebview>=5.0", "pystray>=0.19", "Pillow>=10.0"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]

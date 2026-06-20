@@ -245,6 +245,7 @@ class GuiApi:
             lastKnownGood=last_known_good,
             snapshotCount=snapshot_count,
             protected=protected,
+            trayEnabled=bool(self._ui_prefs(cfg).get("tray", True)),
             onboarded=(cfg.state_dir / "onboarded").exists(),
         )
 
@@ -1226,6 +1227,32 @@ class GuiApi:
             return _err(str(exc))
         return _ok(note=clean)
 
+    # -- UI preferences read at launch (theme lives in localStorage; the tray
+    #    setting must be readable by the Python launch code) --------------------
+
+    def _ui_prefs(self, cfg) -> dict:
+        try:
+            return json.loads((cfg.state_dir / "ui.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def tray_enabled(self) -> bool:
+        cfg = self._config()
+        return True if cfg is None else bool(self._ui_prefs(cfg).get("tray", True))
+
+    def set_tray_enabled(self, on) -> dict:
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        prefs = self._ui_prefs(cfg)
+        prefs["tray"] = bool(on)
+        try:
+            cfg.state_dir.mkdir(parents=True, exist_ok=True)
+            (cfg.state_dir / "ui.json").write_text(json.dumps(prefs, indent=2), encoding="utf-8")
+        except OSError as exc:
+            return _err(str(exc))
+        return _ok(tray=bool(on))
+
     def check_for_update(self) -> dict:
         from irtracker import updater
         return updater.check_for_update()
@@ -1364,6 +1391,80 @@ def build_html() -> str:
 
 # -- launchers -------------------------------------------------------------------
 
+def _setup_tray(api: "GuiApi", window) -> None:
+    """Best-effort system-tray + minimize-to-tray-on-close. Any failure leaves
+    the app with normal close-to-quit behaviour, so this never raises."""
+    try:
+        if not api.tray_enabled():
+            return
+    except Exception:
+        return
+    st = {"tray": None, "quitting": False, "notified": False}
+
+    def on_open():
+        try:
+            window.show()
+        except Exception:
+            pass
+
+    def on_backup():
+        try:
+            r = api.backup_now(None)
+            tray = st["tray"]
+            if tray is not None:
+                msg = "Backup saved." if r.get("created") else (r.get("message") or "Already up to date.")
+                try:
+                    tray.notify(msg, "iRacing Config Tracker")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def on_quit():
+        st["quitting"] = True
+        if st["tray"] is not None:
+            try:
+                st["tray"].stop()
+            except Exception:
+                pass
+        try:
+            window.destroy()
+        except Exception:
+            pass
+
+    try:
+        from irtracker import tray as tray_mod
+        st["tray"] = tray_mod.start_tray(
+            str(_webui_dir() / "logo.png"),
+            on_open=on_open, on_backup=on_backup, on_quit=on_quit)
+    except Exception as exc:
+        log.info("tray setup skipped (%s)", exc)
+        return
+    if st["tray"] is None:
+        return
+
+    def on_closing(*_args):
+        if st["quitting"]:
+            return True  # a real quit was requested from the tray menu
+        try:
+            window.hide()
+        except Exception:
+            return True  # can't hide -> let it close normally
+        if not st["notified"]:
+            st["notified"] = True
+            try:
+                st["tray"].notify("Still running in the tray — click the icon to reopen.",
+                                  "iRacing Config Tracker")
+            except Exception:
+                pass
+        return False  # cancel the close: the app stays in the tray
+
+    try:
+        window.events.closing += on_closing
+    except Exception as exc:
+        log.info("could not hook window close (%s); tray will be info-only", exc)
+
+
 def _launch_pywebview(api: GuiApi) -> bool:
     try:
         import webview
@@ -1375,6 +1476,7 @@ def _launch_pywebview(api: GuiApi) -> bool:
             width=1280, height=820, min_size=(960, 640),
             background_color="#0b1020")
         api._window = window
+        _setup_tray(api, window)  # best-effort; never raises
         webview.start()
         return True
     except Exception as exc:

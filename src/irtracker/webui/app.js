@@ -1295,6 +1295,16 @@ function renderSettings() {
       </div>
     </div>
 
+    <p class="section-label" style="margin-top:22px">App window</p>
+    <div class="card">
+      <div class="toggle-row">
+        <div><div class="label">Keep in the system tray when I close the window</div>
+          <div class="desc">Tucks the app into your tray (with quick “Back up now” + “Open”) instead of quitting. Turn off to quit on close. Applies next time you open the app.</div></div>
+        <div class="spacer"></div>
+        <label class="toggle"><input type="checkbox" id="tgTray" ${o.trayEnabled ? "checked" : ""}><span class="track"></span></label>
+      </div>
+    </div>
+
     <p class="section-label" style="margin-top:22px">Files being protected</p>
     <div class="card">
       ${o.protected.map((p) => `<div class="file-row">
@@ -1330,6 +1340,15 @@ function renderSettings() {
 
   $("#tgWatch").addEventListener("change", onToggleWatch);
   $("#tgAutostart").addEventListener("change", onToggleAutostart);
+  $("#tgTray").addEventListener("change", onToggleTray);
+}
+
+async function onToggleTray(e) {
+  const on = e.target.checked;
+  const r = await api("set_tray_enabled", on);
+  if (!r.ok) { toast(r.error, "bad"); e.target.checked = !on; return; }
+  if (state.overview) state.overview.trayEnabled = on;
+  toast(`System tray ${on ? "on" : "off"} — applies next time you open the app.`, "good");
 }
 
 /* ----------------------------------------------------------------- actions */

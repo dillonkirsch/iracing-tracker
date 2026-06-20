@@ -304,6 +304,21 @@ def test_snapshot_notes(tmp_path):
     assert api.get_history()["items"][0]["note"] == ""
 
 
+def test_tray_setting_persists(tmp_path):
+    from irtracker.gui import GuiApi
+    ira = tmp_path / "iRacing"; ira.mkdir()
+    cfgp = tmp_path / "config.toml"
+    cfgp.write_text(f'[paths]\niracing_dir = "{ira.as_posix()}"\n'
+                    f'data_dir = "{(tmp_path / "data").as_posix()}"\n', encoding="utf-8")
+    api = GuiApi(str(cfgp))
+    assert api.tray_enabled() is True            # default on
+    assert api.set_tray_enabled(False)["tray"] is False
+    assert api.tray_enabled() is False
+    # a fresh instance (and the overview) reads the persisted value
+    assert GuiApi(str(cfgp)).tray_enabled() is False
+    assert GuiApi(str(cfgp)).get_overview()["trayEnabled"] is False
+
+
 def test_migrates_legacy_bare_keys_into_active_profile(cfg, corpus_cfg_bytes):
     # 1) legacy install: controls.cfg at the top level, no profiles yet
     (cfg.iracing_dir / "controls.cfg").write_bytes(corpus_cfg_bytes)
