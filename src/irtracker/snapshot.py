@@ -16,7 +16,8 @@ from pathlib import Path
 from irtracker.config import (
     CONTROLS_SUBDIR, SIDECAR_NAME, Config, active_control_profile, is_sidecar)
 from irtracker.gfcc import GfccError, codec
-from irtracker.repo import Snapshot, SnapshotMeta, SnapshotRepo, meta_for_export
+from irtracker.repo import (
+    TRIGGER_LABELS, Snapshot, SnapshotMeta, SnapshotRepo, meta_for_export)
 from irtracker import semdiff
 
 log = logging.getLogger(__name__)
@@ -149,9 +150,31 @@ class Tracker:
         meta.collapsed = amend
         result.collapsed = amend
         result.commit = self.repo.commit_snapshot(meta, amend=amend)
+        if trigger != "pre_restore":
+            self._maybe_discord(meta)
         log.info("snapshot %s: %s (%s)%s", result.commit[:8],
                  ", ".join(sorted(changes)), trigger, " [collapsed]" if amend else "")
         return result
+
+    def _maybe_discord(self, meta: SnapshotMeta) -> None:
+        """Post to a configured Discord webhook on a committed snapshot (opt-in,
+        best-effort). Config lives in state\\notify.json so the watcher process
+        reads it too."""
+        try:
+            prefs = json.loads((self.cfg.state_dir / "notify.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        url = prefs.get("discord_webhook")
+        if not url or not prefs.get("discord_on_snapshot"):
+            return
+        try:
+            from irtracker import notify
+            files = {n for n in meta.files if not is_sidecar(n)}
+            notify.discord_snapshot(url, files,
+                                    TRIGGER_LABELS.get(meta.trigger, meta.trigger),
+                                    meta.context_label(), build=meta.build)
+        except Exception:
+            log.debug("discord notify skipped", exc_info=True)
 
     def _profile_switch_message(self, changes: dict[str, str]) -> str | None:
         """Friendly history label when this snapshot is (also) an active-profile

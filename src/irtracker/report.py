@@ -49,6 +49,68 @@ def _line_color(line: str) -> tuple[int, int, int]:
     return _NORMAL
 
 
+def documentation_markdown(blocks: list[tuple]) -> str:
+    """Render setup-documentation blocks to Markdown.
+
+    Blocks are (kind, content): h1/h2/h3 (str), li (str), kv ((k, v)), text (str)."""
+    out: list[str] = []
+    for kind, content in blocks:
+        if kind == "h1":
+            out.append(f"# {content}\n")
+        elif kind == "h2":
+            out.append(f"\n## {content}\n")
+        elif kind == "h3":
+            out.append(f"\n### {content}\n")
+        elif kind == "li":
+            out.append(f"- {content}")
+        elif kind == "kv":
+            out.append(f"- **{content[0]}**: {content[1]}")
+        elif kind == "text":
+            out.append(f"\n{content}")
+    return "\n".join(out).strip() + "\n"
+
+
+def build_setup_pdf(blocks: list[tuple], logo_path: Path | None = None) -> bytes:
+    """Render setup-documentation blocks to a PDF (same block format as above)."""
+    from fpdf import FPDF
+    from fpdf.enums import XPos, YPos
+
+    pdf = FPDF(format="Letter", unit="mm")
+    pdf.set_auto_page_break(True, margin=16)
+    pdf.set_title("iRacing setup documentation")
+    pdf.add_page()
+    nl = dict(new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    if logo_path and Path(logo_path).exists():
+        try:
+            pdf.image(str(logo_path), x=pdf.w - pdf.r_margin - 14, y=12, w=14)
+        except Exception:
+            pass
+    for kind, content in blocks:
+        if kind == "h1":
+            pdf.set_font("Helvetica", "B", 17); pdf.set_text_color(20, 24, 32)
+            pdf.multi_cell(0, 8, _safe(content), **nl); pdf.ln(1)
+        elif kind == "h2":
+            if pdf.will_page_break(18):
+                pdf.add_page()
+            pdf.ln(3); pdf.set_font("Helvetica", "B", 13); pdf.set_text_color(*_HEADER)
+            pdf.cell(0, 7, _safe(content), **nl)
+            pdf.set_draw_color(225, 228, 235)
+            pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y()); pdf.ln(1)
+        elif kind == "h3":
+            pdf.ln(1); pdf.set_font("Helvetica", "B", 11); pdf.set_text_color(45, 50, 60)
+            pdf.multi_cell(0, 6, _safe(content), **nl)
+        elif kind == "li":
+            pdf.set_font("Helvetica", "", 10); pdf.set_text_color(*_NORMAL); pdf.set_x(pdf.l_margin + 3)
+            pdf.multi_cell(0, 5, _safe("- " + content), **nl)
+        elif kind == "kv":
+            pdf.set_font("Helvetica", "", 10); pdf.set_text_color(*_NORMAL); pdf.set_x(pdf.l_margin + 3)
+            pdf.multi_cell(0, 5, _safe(f"{content[0]}: {content[1]}"), **nl)
+        elif kind == "text":
+            pdf.set_font("Helvetica", "B", 10); pdf.set_text_color(*_DIM)
+            pdf.multi_cell(0, 5, _safe(content), **nl)
+    return bytes(pdf.output())
+
+
 def build_comparison_pdf(label_a: str, label_b: str,
                          files: list[dict], logo_path: Path | None = None) -> bytes:
     """files: [{"name": str, "body": str}]. Returns PDF bytes."""

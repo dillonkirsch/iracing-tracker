@@ -397,6 +397,54 @@ def test_apply_recipe_end_to_end(tmp_path):
     assert api.apply_recipe(text)["applied"] == 0
 
 
+def test_documentation_export(tmp_path, corpus_cfg_bytes):
+    from irtracker.gui import GuiApi
+    from irtracker import report
+    ira = tmp_path / "iRacing"; ira.mkdir()
+    (ira / "controls.cfg").write_bytes(corpus_cfg_bytes)
+    (ira / "app.ini").write_text("[Graphics]\nFieldOfView=90\n", encoding="utf-8")
+    cfgp = tmp_path / "config.toml"
+    cfgp.write_text(f'[paths]\niracing_dir = "{ira.as_posix()}"\n'
+                    f'data_dir = "{(tmp_path / "data").as_posix()}"\n', encoding="utf-8")
+    api = GuiApi(str(cfgp))
+    md = api.documentation_markdown()["text"]
+    assert "## Devices" in md and "## Controls" in md and "## Settings" in md
+    assert "FieldOfView" in md and "Throttle" in md
+    pdf = report.build_setup_pdf(api._documentation_blocks(api._config()))
+    assert pdf[:4] == b"%PDF" and len(pdf) > 1000
+
+
+def test_discord_config_and_snapshot_hook(tmp_path, monkeypatch):
+    from irtracker.gui import GuiApi
+    from irtracker.snapshot import Tracker
+    from irtracker.config import load_config
+    from irtracker import notify
+    ira = tmp_path / "iRacing"; ira.mkdir()
+    (ira / "app.ini").write_text("[A]\nx=1\n", encoding="utf-8")
+    cfgp = tmp_path / "config.toml"
+    cfgp.write_text(f'[paths]\niracing_dir = "{ira.as_posix()}"\n'
+                    f'data_dir = "{(tmp_path / "data").as_posix()}"\n'
+                    f'[watcher]\nsim_processes = ["__none__.exe"]\n', encoding="utf-8")
+    api = GuiApi(str(cfgp))
+    assert api.get_discord() == {"ok": True, "webhook": "", "enabled": False}
+    assert not api.set_discord("notaurl", True)["ok"]            # must be https://
+    assert api.set_discord("https://discord.com/api/webhooks/1/abc", True)["ok"]
+    assert api.get_discord()["enabled"] is True
+
+    captured = {}
+    monkeypatch.setattr(notify, "discord_snapshot",
+                        lambda url, files, lbl, ctx, build=None: captured.update(url=url, files=set(files)))
+    t = Tracker(load_config(cfgp))
+    (ira / "app.ini").write_text("[A]\nx=2\n", encoding="utf-8")
+    t.take_snapshot("manual")
+    assert captured.get("url") == "https://discord.com/api/webhooks/1/abc"
+    assert "app.ini" in captured.get("files", set())
+    captured.clear()                                              # safety backups don't post
+    (ira / "app.ini").write_text("[A]\nx=3\n", encoding="utf-8")
+    t.take_snapshot("pre_restore")
+    assert not captured
+
+
 def test_migrates_legacy_bare_keys_into_active_profile(cfg, corpus_cfg_bytes):
     # 1) legacy install: controls.cfg at the top level, no profiles yet
     (cfg.iracing_dir / "controls.cfg").write_bytes(corpus_cfg_bytes)

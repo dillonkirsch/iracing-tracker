@@ -1457,6 +1457,31 @@ function renderSettings() {
       </div>
     </div>
 
+    <p class="section-label" style="margin-top:22px">Setup documentation</p>
+    <div class="card">
+      <p class="muted mt-0" style="font-size:12.5px">Export your whole setup — devices, every control binding, and all settings — to share with teammates or archive.</p>
+      <div class="row-gap" style="margin-top:8px">
+        <button class="btn btn-sm" data-action="docs-md">${icon("doc")} Copy as Markdown</button>
+        <button class="btn btn-sm btn-primary" data-action="docs-pdf">${icon("doc")} Save as PDF</button>
+      </div>
+    </div>
+
+    <p class="section-label" style="margin-top:22px">Discord notifications</p>
+    <div class="card">
+      <p class="muted mt-0" style="font-size:12.5px">Post a message to a Discord channel whenever a backup is saved — handy for streamers and leagues. (In Discord: Channel → Edit → Integrations → Webhooks → New Webhook → Copy URL.)</p>
+      <div class="toggle-row" style="border:0;padding:10px 0 6px">
+        <div><div class="label">Post backups to Discord</div>
+          <div class="desc">Sends a message on each saved backup (auto and manual).</div></div>
+        <div class="spacer"></div>
+        <label class="toggle"><input type="checkbox" id="tgDiscord" ${o.discord && o.discord.enabled ? "checked" : ""}><span class="track"></span></label>
+      </div>
+      <input class="search" id="discordUrl" placeholder="https://discord.com/api/webhooks/…" value="${esc((o.discord && o.discord.webhook) || "")}" style="margin-bottom:0">
+      <div class="row-gap" style="margin-top:10px">
+        <button class="btn btn-sm btn-primary" data-action="discord-save">${icon("shieldCheck")} Save</button>
+        <button class="btn btn-sm" data-action="discord-test">Send test message</button>
+      </div>
+    </div>
+
     <p class="section-label" style="margin-top:22px">Files being protected</p>
     <div class="card">
       <p class="muted mt-0" style="font-size:12.5px">Choose which iRacing files this app backs up. “Don’t track” stops backing a file up; “group repeats” squashes rapid repeated tweaks into one history entry. Applies to new backups — restart auto-backup (toggle above) to update the background watcher.</p>
@@ -1554,6 +1579,40 @@ async function onToggleTray(e) {
   if (!r.ok) { toast(r.error, "bad"); e.target.checked = !on; return; }
   if (state.overview) state.overview.trayEnabled = on;
   toast(`System tray ${on ? "on" : "off"} — applies next time you open the app.`, "good");
+}
+
+async function doExportDocsMd() {
+  const r = await api("documentation_markdown");
+  if (!r.ok) { toast(r.error, "bad"); return; }
+  state.docsMd = r.text;
+  infoModal({ title: "Setup documentation (Markdown)", bodyHtml: `
+    <div class="spread" style="margin-bottom:8px"><span class="muted" style="font-size:12.5px">Copy this and paste it anywhere, or save it as a .md file.</span>
+      <button class="btn btn-sm" data-action="docs-copy">Copy</button></div>
+    <textarea class="modal-input" readonly style="min-height:300px;font-family:Consolas,monospace;font-size:11.5px">${esc(r.text)}</textarea>` });
+}
+async function doCopyDocs() {
+  try { await navigator.clipboard.writeText(state.docsMd || ""); toast("Documentation copied.", "good"); }
+  catch (e) { toast("Select the text to copy it.", "bad"); }
+}
+async function doExportDocsPdf() {
+  toast("Building PDF…");
+  const r = await api("export_documentation_pdf");
+  if (!r.ok) { toast(r.error, "bad"); return; }
+  if (r.cancelled) return;
+  toast(r.message || "Saved.", "good");
+}
+async function doDiscordSave() {
+  const url = (($("#discordUrl") || {}).value || "").trim();
+  const on = !!($("#tgDiscord") || {}).checked;
+  const r = await api("set_discord", url, on);
+  if (!r.ok) { toast(r.error, "bad"); return; }
+  if (state.overview) state.overview.discord = { webhook: url, enabled: on };
+  toast(r.message, "good");
+}
+async function doDiscordTest() {
+  const url = (($("#discordUrl") || {}).value || "").trim();
+  const r = await api("send_discord_test", url);
+  toast(r.ok ? r.message : r.error, r.ok ? "good" : "bad");
 }
 
 /* ----------------------------------------------------------------- actions */
@@ -1903,6 +1962,11 @@ document.addEventListener("click", (e) => {
   if (a === "browse-iracing") return doBrowse("setIracing");
   if (a === "browse-data") return doBrowse("setData");
   if (a === "save-settings") return doSaveSettings();
+  if (a === "docs-md") return doExportDocsMd();
+  if (a === "docs-copy") return doCopyDocs();
+  if (a === "docs-pdf") return doExportDocsPdf();
+  if (a === "discord-save") return doDiscordSave();
+  if (a === "discord-test") return doDiscordTest();
   if (a === "tracked-add") return doTrackedAdd();
   if (a === "tracked-remove") return doTrackedRemove(+btn.dataset.i);
   if (a === "tracked-save") return doTrackedSave();

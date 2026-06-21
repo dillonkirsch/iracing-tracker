@@ -125,6 +125,13 @@ def _set_tracked_in_text(text: str, tracked: list) -> str:
     return f"{head_text}\n\n{blocks}"
 
 
+def _pretty_action(name: str) -> str:
+    """CamelCase action name -> spaced (mirrors the JS prettyAction)."""
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name)
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", s)
+    return re.sub(r"([a-zA-Z])([0-9])", r"\1 \2", s)
+
+
 def _bits(value: int) -> list[int]:
     out, i = [], 0
     while value:
@@ -296,6 +303,7 @@ class GuiApi:
             tracked=tracked,
             currentBuild=current_build,
             buildUpdate=build_update,
+            discord=self._discord_prefs(cfg),
             snapshotCount=snapshot_count,
             protected=protected,
             trayEnabled=bool(self._ui_prefs(cfg).get("tray", True)),
@@ -1548,6 +1556,165 @@ class GuiApi:
             return _ok(text=paste.fetch(url))
         except Exception as exc:
             return _err(f"Couldn't load that link ({exc}).")
+
+    # -- setup documentation export (Markdown / PDF) ---------------------------
+
+    def _documentation_blocks(self, cfg, profile=None) -> list:
+        from datetime import datetime
+        from irtracker import build as build_mod
+        from irtracker.semdiff import parse_ini
+        from irtracker.report import friendly_name
+        blocks = [("h1", f"iRacing setup — {datetime.now().strftime('%Y-%m-%d %H:%M')}")]
+        b = build_mod.current_build()
+        if b:
+            blocks.append(("kv", ("iRacing build", b)))
+        active = active_control_profile(cfg.iracing_dir)
+        view = profile if profile in cfg.control_profile_names() else active
+        if view:
+            blocks.append(("kv", ("Active control profile", view)))
+
+        controls = self._profile_file(cfg, "controls.cfg", view)
+        doc = None
+        if controls.exists():
+            try:
+                doc = codec.decode_bytes(controls.read_bytes())
+            except (OSError, GfccError):
+                doc = None
+        if doc is not None:
+            from irtracker.gfcc.devices import build_report
+            jc = self._profile_file(cfg, "joyCalib.yaml", view)
+            report = build_report(doc, jc.read_text(encoding="utf-8", errors="replace")
+                                  if jc.exists() else None)
+            blocks.append(("h2", "Devices"))
+            blocks.append(("h3", "Connected now"))
+            for d in report.connected or []:
+                blocks.append(("li", f"{d.name or 'Game controller'} — {d.instance_guid}"))
+            if not report.connected:
+                blocks.append(("li", "(none detected)"))
+            if report.referenced:
+                blocks.append(("h3", "Used in your controls"))
+                for d in report.referenced:
+                    blocks.append(("li", f"{d.name or 'Game controller'} — {d.instance_guid}"))
+
+            groups: dict = {}
+            for bnd in self._bindings(doc):
+                if bnd["kind"] == "unbound":
+                    continue
+                groups.setdefault(bnd["device"] or "Other", []).append(bnd)
+            blocks.append(("h2", f"Controls — {sum(len(v) for v in groups.values())} assignments"))
+            for dev in sorted(groups, key=lambda d: (d == "Keyboard", d)):
+                blocks.append(("h3", dev))
+                for bnd in sorted(groups[dev], key=lambda x: _pretty_action(x["action"])):
+                    blocks.append(("kv", (_pretty_action(bnd["action"]), bnd["display"])))
+
+        blocks.append(("h2", "Settings"))
+        for name in cfg.tracked_files_present():
+            if not name.lower().endswith(".ini"):
+                continue
+            try:
+                parsed = parse_ini(cfg.live_path(name).read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+            if not parsed:
+                continue
+            blocks.append(("h3", f"{friendly_name(name)} ({name})"))
+            for section, keys in parsed.items():
+                blocks.append(("text", f"[{section}]"))
+                for k, v in keys.items():
+                    blocks.append(("kv", (k, v)))
+        return blocks
+
+    def documentation_markdown(self, profile: str | None = None) -> dict:
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        from irtracker import report
+        try:
+            text = report.documentation_markdown(self._documentation_blocks(cfg, profile))
+        except Exception as exc:
+            return _err(str(exc))
+        return _ok(text=text)
+
+    def _save_dialog(self, default_name: str, file_types: str):
+        """Native save dialog -> Path; None if the user cancelled; Desktop fallback
+        when there's no native window."""
+        if self._window is not None:
+            try:
+                import webview
+                picked = self._window.create_file_dialog(
+                    webview.SAVE_DIALOG, save_filename=default_name, file_types=(file_types,))
+                if not picked:
+                    return None
+                return Path(picked if isinstance(picked, str) else picked[0])
+            except Exception as exc:  # pragma: no cover - dialog edge cases
+                log.warning("save dialog failed (%s); falling back to Desktop", exc)
+        desktop = Path.home() / "Desktop"
+        return (desktop if desktop.is_dir() else Path.home()) / default_name
+
+    def export_documentation_pdf(self, profile: str | None = None) -> dict:
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        from datetime import datetime
+        from irtracker import report
+        try:
+            pdf = report.build_setup_pdf(self._documentation_blocks(cfg, profile),
+                                         WEBUI_DIR / "logo.png")
+        except Exception as exc:
+            return _err(f"Couldn't build the PDF: {exc}")
+        dest = self._save_dialog(f"iracing-setup-{datetime.now().strftime('%Y%m%d')}.pdf",
+                                 "PDF document (*.pdf)")
+        if dest is None:
+            return _ok(cancelled=True)
+        try:
+            Path(dest).write_bytes(pdf)
+        except OSError as exc:
+            return _err(str(exc))
+        return _ok(path=str(dest), message=f"Saved setup documentation to {dest}")
+
+    # -- Discord webhook on snapshot (opt-in) ----------------------------------
+
+    @staticmethod
+    def _discord_prefs(cfg) -> dict:
+        try:
+            p = json.loads((cfg.state_dir / "notify.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            p = {}
+        return {"webhook": p.get("discord_webhook", ""),
+                "enabled": bool(p.get("discord_on_snapshot"))}
+
+    def get_discord(self) -> dict:
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        return _ok(**self._discord_prefs(cfg))
+
+    def set_discord(self, webhook: str, enabled) -> dict:
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        url = (webhook or "").strip()
+        if enabled and not url.lower().startswith("https://"):
+            return _err("Paste your Discord webhook URL (it starts with https://).")
+        try:
+            cfg.state_dir.mkdir(parents=True, exist_ok=True)
+            (cfg.state_dir / "notify.json").write_text(json.dumps(
+                {"discord_webhook": url, "discord_on_snapshot": bool(enabled)}, indent=2),
+                encoding="utf-8")
+        except OSError as exc:
+            return _err(str(exc))
+        return _ok(message="Saved Discord settings.")
+
+    def send_discord_test(self, webhook: str) -> dict:
+        from irtracker import notify
+        url = (webhook or "").strip()
+        if not url.lower().startswith("https://"):
+            return _err("Paste your Discord webhook URL first (it starts with https://).")
+        try:
+            notify.discord_test(url)
+        except Exception as exc:
+            return _err(f"Couldn't post to that webhook ({exc}).")
+        return _ok(message="Sent a test message — check your Discord channel.")
 
     def open_folder(self, which: str) -> dict:
         cfg = self._config()
