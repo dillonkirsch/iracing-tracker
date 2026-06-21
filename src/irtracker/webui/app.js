@@ -251,32 +251,15 @@ async function doExportRecipe() {
     state.recipeText = ex.text;
     root.querySelector(".modal").innerHTML = `
       <h3>Recipe ready — “${esc(ex.name)}”</h3>
-      <p>${ex.count} setting${ex.count === 1 ? "" : "s"} from ${esc(fileLabel(ex.file))}. Copy it, or share a link anyone can open.</p>
-      <textarea class="modal-input" readonly style="min-height:130px;font-family:Consolas,monospace;font-size:12px">${esc(ex.text)}</textarea>
-      <div id="recShareOut"></div>
+      <p>${ex.count} setting${ex.count === 1 ? "" : "s"} from ${esc(fileLabel(ex.file))}. Copy it and share it however you like — paste it back in via “Import”.</p>
+      <textarea class="modal-input" readonly style="min-height:170px;font-family:Consolas,monospace;font-size:12px">${esc(ex.text)}</textarea>
       <div class="modal-actions"><button class="btn btn-ghost" data-x="close">Close</button>
-        <button class="btn" data-x="copy">Copy</button>
-        <button class="btn btn-primary" data-x="share">Share via link</button></div>`;
+        <button class="btn btn-primary" data-x="copy">Copy</button></div>`;
     const m = root.querySelector(".modal");
     m.querySelector('[data-x="close"]').onclick = close;
     m.querySelector('[data-x="copy"]').onclick = async () => {
       try { await navigator.clipboard.writeText(state.recipeText); toast("Recipe copied.", "good"); }
       catch (e) { toast("Select the text to copy it.", "bad"); }
-    };
-    m.querySelector('[data-x="share"]').onclick = () => {
-      $("#recShareOut").innerHTML = `<div class="card" style="margin-top:10px;padding:10px 12px;font-size:12.5px">
-        <span class="muted">${icon("alert")} This creates a public link via pastebin.com (if you set an API key in Settings) or the encrypted PrivateBin — <b>anyone with the link can read it</b> (settings only, no personal info).</span>
-        <div class="row-gap" style="margin-top:8px"><button class="btn btn-sm btn-primary" id="recDoShare">Upload &amp; get link</button></div></div>`;
-      $("#recDoShare").onclick = async () => {
-        $("#recShareOut").innerHTML = `<div class="loading" style="padding:10px">Uploading…</div>`;
-        const sr = await api("share_recipe", state.recipeText);
-        if (!sr.ok) { $("#recShareOut").innerHTML = `<p class="muted" style="font-size:12.5px;margin-top:8px">${esc(sr.error)}</p>`; return; }
-        $("#recShareOut").innerHTML = `<div class="card" style="margin-top:10px;padding:10px 12px">
-          <div class="muted" style="font-size:12px">Share this link:</div>
-          <div class="row-gap" style="margin-top:5px"><input class="search" readonly value="${esc(sr.url)}" style="margin:0;flex:1"><button class="btn btn-sm" id="recCopyLink">Copy link</button></div></div>`;
-        $("#recShareOut").querySelector("input").onclick = (e) => e.target.select();
-        $("#recCopyLink").onclick = async () => { try { await navigator.clipboard.writeText(sr.url); toast("Link copied.", "good"); } catch (e) {} };
-      };
     };
   };
 }
@@ -285,26 +268,17 @@ function doImportRecipe() {
   const root = $("#modalRoot");
   root.innerHTML = `<div class="modal-bg"><div class="modal" style="max-width:480px">
     <h3>Import a recipe</h3>
-    <p>Paste a recipe, or load one from a share link. You'll see exactly what it changes before anything is applied.</p>
-    <textarea class="modal-input" id="impText" placeholder="Paste recipe text here…" style="min-height:104px;font-family:Consolas,monospace;font-size:12px"></textarea>
-    <div class="row-gap"><input class="search" id="impLink" placeholder="…or paste a share link" style="margin:0;flex:1"><button class="btn btn-sm" id="impLoad">Load</button></div>
+    <p>Paste a recipe below. You'll see exactly what it changes before anything is applied.</p>
+    <textarea class="modal-input" id="impText" placeholder="Paste recipe text here…" style="min-height:120px;font-family:Consolas,monospace;font-size:12px"></textarea>
     <div id="impPreview"></div>
     <div class="modal-actions"><button class="btn btn-ghost" data-x="cancel">Cancel</button><button class="btn btn-primary" id="impPreviewBtn">Preview changes</button></div>
   </div></div>`;
   const close = () => { root.innerHTML = ""; };
   root.querySelector('[data-x="cancel"]').onclick = close;
   root.querySelector(".modal-bg").onclick = (e) => { if (e.target.classList.contains("modal-bg")) close(); };
-  $("#impLoad").onclick = async () => {
-    const url = $("#impLink").value.trim();
-    if (!url) return;
-    $("#impPreview").innerHTML = `<div class="loading" style="padding:8px">Loading…</div>`;
-    const r = await api("fetch_recipe", url);
-    if (!r.ok) { $("#impPreview").innerHTML = `<p class="muted" style="font-size:12.5px;margin-top:6px">${esc(r.error)}</p>`; return; }
-    $("#impText").value = r.text; $("#impPreview").innerHTML = "";
-  };
   $("#impPreviewBtn").onclick = async () => {
     const text = $("#impText").value.trim();
-    if (!text) { toast("Paste a recipe or load a link first.", "bad"); return; }
+    if (!text) { toast("Paste a recipe first.", "bad"); return; }
     const pv = await api("preview_recipe", text);
     if (!pv.ok) { $("#impPreview").innerHTML = `<p class="muted" style="margin-top:8px;font-size:12.5px">${esc(pv.error)}</p>`; return; }
     if (!pv.changes.length) {
@@ -1482,18 +1456,6 @@ function renderSettings() {
       </div>
     </div>
 
-    <p class="section-label" style="margin-top:22px">Share links (recipes)</p>
-    <div class="card">
-      <p class="muted mt-0" style="font-size:12.5px">“Share via link” (in Game Settings) uses pastebin.com if you add a free API key below; otherwise it uses the end-to-end-encrypted PrivateBin.</p>
-      <div style="font-weight:600;margin-top:8px">Pastebin API key <span class="muted" style="font-weight:400;font-size:12px">(optional — free at pastebin.com/doc_api)</span></div>
-      <input class="search" id="pastebinKey" placeholder="Your pastebin api_dev_key" value="${esc((o.share && o.share.pastebinKey) || "")}" style="margin-top:6px;margin-bottom:0">
-      <div style="font-weight:600;margin-top:12px">PrivateBin instance <span class="muted" style="font-weight:400;font-size:12px">(encrypted; default privatebin.net)</span></div>
-      <input class="search" id="privatebinInstance" placeholder="https://privatebin.net" value="${esc((o.share && o.share.privatebinInstance) || "")}" style="margin-top:6px;margin-bottom:0">
-      <div class="row-gap" style="margin-top:10px">
-        <button class="btn btn-sm btn-primary" data-action="share-save">${icon("shieldCheck")} Save</button>
-      </div>
-    </div>
-
     <p class="section-label" style="margin-top:22px">Files being protected</p>
     <div class="card">
       <p class="muted mt-0" style="font-size:12.5px">Choose which iRacing files this app backs up. “Don’t track” stops backing a file up; “group repeats” squashes rapid repeated tweaks into one history entry. Applies to new backups — restart auto-backup (toggle above) to update the background watcher.</p>
@@ -1625,14 +1587,6 @@ async function doDiscordTest() {
   const url = (($("#discordUrl") || {}).value || "").trim();
   const r = await api("send_discord_test", url);
   toast(r.ok ? r.message : r.error, r.ok ? "good" : "bad");
-}
-async function doShareSave() {
-  const key = ((($("#pastebinKey") || {}).value) || "").trim();
-  const inst = ((($("#privatebinInstance") || {}).value) || "").trim();
-  const r = await api("set_share_settings", key, inst);
-  if (!r.ok) { toast(r.error, "bad"); return; }
-  if (state.overview) state.overview.share = { pastebinKey: key, privatebinInstance: inst };
-  toast(r.message, "good");
 }
 
 /* ----------------------------------------------------------------- actions */
@@ -1987,7 +1941,6 @@ document.addEventListener("click", (e) => {
   if (a === "docs-pdf") return doExportDocsPdf();
   if (a === "discord-save") return doDiscordSave();
   if (a === "discord-test") return doDiscordTest();
-  if (a === "share-save") return doShareSave();
   if (a === "tracked-add") return doTrackedAdd();
   if (a === "tracked-remove") return doTrackedRemove(+btn.dataset.i);
   if (a === "tracked-save") return doTrackedSave();

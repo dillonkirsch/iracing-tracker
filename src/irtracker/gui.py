@@ -304,8 +304,6 @@ class GuiApi:
             currentBuild=current_build,
             buildUpdate=build_update,
             discord=self._discord_prefs(cfg),
-            share={"pastebinKey": self._ui_prefs(cfg).get("pastebin_key", ""),
-                   "privatebinInstance": self._ui_prefs(cfg).get("privatebin_instance", "")},
             snapshotCount=snapshot_count,
             protected=protected,
             trayEnabled=bool(self._ui_prefs(cfg).get("tray", True)),
@@ -1544,39 +1542,6 @@ class GuiApi:
         return _ok(applied=len(changes),
                    message=f"Applied {len(changes)} setting(s) from \"{recipe.get('name')}\".")
 
-    def share_recipe(self, text: str) -> dict:
-        from irtracker import paste
-        cfg = self._config()
-        prefs = self._ui_prefs(cfg) if cfg else {}
-        try:
-            url = paste.share(text,
-                              pastebin_key=(prefs.get("pastebin_key") or None),
-                              privatebin_instance=(prefs.get("privatebin_instance") or None))
-        except Exception as exc:
-            return _err(f"Couldn't share: {exc}. You can still copy the recipe text "
-                        f"and share it yourself.")
-        return _ok(url=url)
-
-    def set_share_settings(self, pastebin_key=None, privatebin_instance=None) -> dict:
-        cfg = self._config()
-        if cfg is None:
-            return _err(self._cfg_error or "could not load configuration")
-        prefs = self._ui_prefs(cfg)
-        prefs["pastebin_key"] = (pastebin_key or "").strip()
-        prefs["privatebin_instance"] = (privatebin_instance or "").strip()
-        try:
-            cfg.state_dir.mkdir(parents=True, exist_ok=True)
-            (cfg.state_dir / "ui.json").write_text(json.dumps(prefs, indent=2), encoding="utf-8")
-        except OSError as exc:
-            return _err(str(exc))
-        return _ok(message="Saved share settings.")
-
-    def fetch_recipe(self, url: str) -> dict:
-        from irtracker import paste
-        try:
-            return _ok(text=paste.fetch(url))
-        except Exception as exc:
-            return _err(f"Couldn't load that link ({exc}).")
 
     # -- setup documentation export (Markdown / PDF) ---------------------------
 
