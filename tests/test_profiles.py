@@ -343,6 +343,36 @@ def test_set_tracked_persists_and_keeps_ignore_keys(tmp_path):
     assert not GuiApi(str(cfgp)).set_tracked([])["ok"]      # empty list refused
 
 
+def test_build_update_detection(tmp_path, monkeypatch):
+    from irtracker.config import load_config
+    from irtracker.snapshot import Tracker
+    from irtracker.gui import GuiApi
+    import irtracker.build as bmod
+    ira = tmp_path / "iRacing"; ira.mkdir()
+    cfgp = tmp_path / "config.toml"
+    cfgp.write_text(f'[paths]\niracing_dir = "{ira.as_posix()}"\n'
+                    f'data_dir = "{(tmp_path / "data").as_posix()}"\n'
+                    f'[watcher]\nsim_processes = ["___no_such_sim___.exe"]\n', encoding="utf-8")
+    cfg = load_config(cfgp); t = Tracker(cfg)
+
+    def w(name, v): (ira / name).write_text(v, encoding="utf-8")
+    monkeypatch.setattr(bmod, "current_build", lambda: "2026.05.20.05")
+    w("app.ini", "[FFB]\nstrength=20\n"); t.take_snapshot("manual")
+    # iRacing auto-patches and rewrites a config on its own
+    monkeypatch.setattr(bmod, "current_build", lambda: "2026.06.12.02")
+    w("app.ini", "[FFB]\nstrength=20\n[Graphics]\nFOV=90\n")
+    t.take_snapshot("startup_scan")
+
+    api = GuiApi(str(cfgp))
+    ov = api.get_overview()
+    assert ov["currentBuild"] == "2026.06.12.02"
+    u = ov["buildUpdate"]
+    assert u and u["fromBuild"] == "2026.05.20.05" and u["toBuild"] == "2026.06.12.02"
+    assert "app.ini" in u["files"]
+    assert api.ack_build("2026.06.12.02")["ok"]      # dismissing hides it
+    assert api.get_overview()["buildUpdate"] is None
+
+
 def test_migrates_legacy_bare_keys_into_active_profile(cfg, corpus_cfg_bytes):
     # 1) legacy install: controls.cfg at the top level, no profiles yet
     (cfg.iracing_dir / "controls.cfg").write_bytes(corpus_cfg_bytes)

@@ -55,6 +55,8 @@ def _populate() -> str:
         encoding="utf-8")
 
     api = GuiApi(str(cfg_path))
+    import irtracker.build as _bld
+    _bld.current_build = lambda: "2026.05.20.05"  # everything so far is on the old build
     api.backup_now("known-good baseline")
     # a second backup with a small edit so history + diffs have content
     jc = prof / "joyCalib.yaml"
@@ -90,6 +92,12 @@ def _populate() -> str:
     tracker.take_snapshot("event", sim_running=True, car=car, track=track)
     ap.write_text(ap.read_text(encoding="utf-8").replace("strength=28.0", "strength=31.0"), encoding="utf-8")
     tracker.take_snapshot("sim_exit", car=car, track=track)
+    # simulate an iRacing auto-update that rewrote graphics settings on its own
+    _bld.current_build = lambda: "2026.06.12.02"
+    ap.write_text(ap.read_text(encoding="utf-8")
+                  .replace("FieldOfView=100", "FieldOfView=85")
+                  .replace("mirrorQuality=2", "mirrorQuality=1"), encoding="utf-8")
+    tracker.take_snapshot("startup_scan")
     return str(cfg_path)
 
 

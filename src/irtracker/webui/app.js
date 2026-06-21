@@ -356,7 +356,7 @@ function renderHome() {
       `Your iRacing settings are safe. Last backup: ${esc(when)}.`);
   }
 
-  let cards = "";
+  let cards = buildUpdateCard(o);
   if (o.pending.length > 0) {
     cards += `<div class="card"><p class="section-label">Unsaved changes</p>
       ${o.pending.map(pendingRow).join("")}</div>`;
@@ -407,6 +407,50 @@ function backupSummary(s) {
 function knownGoodChip(s) {
   return s && s.knownGood
     ? `<span class="chip tag-chip">${icon("shieldCheck")} Known-good</span>` : "";
+}
+
+function buildUpdateCard(o) {
+  const u = o.buildUpdate;
+  if (!u) return "";
+  const files = [...new Set(Object.keys(u.files || {}).map(fileLabel))];
+  return `<div class="card conflict-banner">
+    <div class="spread">
+      <p class="section-label mt-0" style="color:var(--warn)">${icon("alert")} iRacing updated to build ${esc(u.toBuild)}</p>
+      <button class="btn btn-sm btn-ghost" data-action="ack-build" data-build="${esc(u.toBuild)}">Dismiss</button>
+    </div>
+    <p class="muted mt-0" style="font-size:12.5px;line-height:1.5">On ${esc(fmtDate(u.date))}, the update from ${esc(u.fromBuild)} changed ${files.length} file${files.length === 1 ? "" : "s"} on its own${files.length ? ` — ${esc(files.join(", "))}` : ""}. That was iRacing, not you.</p>
+    <div class="row-gap" style="margin-top:10px">
+      <button class="btn btn-sm btn-primary" data-action="build-compare" data-a="${esc(u.beforeRev)}" data-b="${esc(u.atRev)}">${icon("rotate")} See what changed</button>
+      <button class="btn btn-sm" data-action="build-restore" data-rev="${esc(u.beforeRev)}">${icon("shield")} Restore pre-update</button>
+    </div>
+  </div>`;
+}
+
+async function doBuildCompare(a, b) {
+  const r = await api("get_comparison", a, b, "Before update", "After update");
+  if (!r.ok) { toast(r.error, "bad"); return; }
+  const body = r.files.length
+    ? r.files.map((f) => `<div class="diff-file"><h4>${esc(fileLabel(f.name))}</h4><div class="diff-body">${colorizeDiff(f.body)}</div></div>`).join("")
+    : `<p class="muted">No tracked changes in this update.</p>`;
+  infoModal({ title: "What iRacing's update changed", bodyHtml: body });
+}
+
+async function doBuildRestore(rev) {
+  const ok = await confirmModal({
+    title: "Restore your pre-update settings?",
+    body: "This puts your iRacing files back to how they were just before the update. A safety backup of the current state is made first, so it's reversible.",
+    confirmLabel: "Restore", danger: false,
+  });
+  if (!ok) return;
+  const r = await api("restore_baseline", rev);
+  if (!r.ok && r.simBlocked) { toast(r.error, "bad"); return; }
+  toast(r.ok ? r.message : r.error, r.ok ? "good" : "bad");
+  if (r.ok) await refreshAll();
+}
+
+async function doAckBuild(b) {
+  await api("ack_build", b);
+  await refreshAll();
 }
 
 function knownGoodCard(o) {
@@ -650,7 +694,7 @@ async function showBackupDetail(rev) {
     <p class="section-label">Backup details</p>
     <div class="card" style="padding:14px">
       <div style="font-weight:650;margin-bottom:4px">${esc(triggerLabel(s.trigger))}</div>
-      <div class="muted" style="font-size:12.5px">${esc(fmtDate(s.date))}</div>
+      <div class="muted" style="font-size:12.5px">${esc(fmtDate(s.date))}${s.build ? ` · iRacing build ${esc(s.build)}` : ""}</div>
       ${s.contextLabel && s.contextLabel !== "manual edit" ? `<div class="tl-ctx" style="margin-top:8px">${icon("clock")} ${esc(s.contextLabel)}</div>` : ""}
       ${s.message ? `<div class="tl-msg">“${esc(s.message)}”</div>` : ""}
       <div class="tl-files" style="margin-top:10px">${fileChips(s.files)}${tags}</div>
@@ -1737,6 +1781,9 @@ document.addEventListener("click", (e) => {
   if (a === "edit-note") return doEditNote(btn.dataset.rev);
   if (a === "export") return doExport(rev);
   if (a === "remap") return doRemap(btn.dataset.old, btn.dataset.new);
+  if (a === "build-compare") return doBuildCompare(btn.dataset.a, btn.dataset.b);
+  if (a === "build-restore") return doBuildRestore(btn.dataset.rev);
+  if (a === "ack-build") return doAckBuild(btn.dataset.build);
   if (a === "mark-known-good") return doMarkKnownGood();
   if (a === "revert-known-good") return doRevertKnownGood(btn.dataset.tag);
   if (a === "delete-known-good") return doDeleteKnownGood(btn.dataset.tag);

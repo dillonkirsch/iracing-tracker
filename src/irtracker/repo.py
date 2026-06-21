@@ -46,12 +46,14 @@ class SnapshotMeta:
     message: str | None = None
     time: str = ""
     collapsed: bool = False
+    build: str | None = None  # iRacing build active when this snapshot was taken
 
     def to_json(self) -> str:
         return json.dumps({
             "trigger": self.trigger, "files": self.files,
             "sim_running": self.sim_running, "car": self.car, "track": self.track,
             "message": self.message, "time": self.time, "collapsed": self.collapsed,
+            "build": self.build,
         }, ensure_ascii=False)
 
     @classmethod
@@ -62,6 +64,7 @@ class SnapshotMeta:
             sim_running=bool(d.get("sim_running")), car=d.get("car"),
             track=d.get("track"), message=d.get("message"),
             time=d.get("time", ""), collapsed=bool(d.get("collapsed")),
+            build=d.get("build"),
         )
 
     def context_label(self) -> str:

@@ -14,6 +14,11 @@ CORPUS = Path(__file__).parent / "corpus"
 @pytest.fixture(autouse=True)
 def fast_reads(monkeypatch):
     monkeypatch.setattr(snapshot_mod, "SETTLE_SECONDS", 0.0)
+    # Don't probe the real machine's iRacing build during tests (deterministic,
+    # and avoids a registry scan per snapshot). Tests that exercise build
+    # detection patch this themselves.
+    from irtracker import build as build_mod
+    monkeypatch.setattr(build_mod, "current_build", lambda: None)
 
 
 @pytest.fixture

@@ -194,6 +194,7 @@ class GuiApi:
             "tags": [t for t in s.tags if not _is_known_good(t)],
             "knownGood": any(_is_known_good(t) for t in s.tags),
             "collapsed": s.meta.collapsed,
+            "build": s.meta.build,
         }
 
     # -- overview / dashboard ----------------------------------------------------
@@ -226,11 +227,31 @@ class GuiApi:
 
         latest = None
         snapshot_count = 0
+        snaps = []
         if repo.initialized and repo.head():
             snaps = repo.log()
             snapshot_count = len(snaps)
             if snaps:
                 latest = self._snap_dict(snaps[0])
+
+        # "Did I break it or did iRacing?" — the most recent snapshot boundary
+        # where the iRacing build changed (sim updates rewrite configs on their
+        # own), unless the user already dismissed that build.
+        from irtracker import build as build_mod
+        current_build = build_mod.current_build()
+        build_update = None
+        ack = self._ui_prefs(cfg).get("ackBuild")
+        for i in range(len(snaps) - 1):
+            new_b, old_b = snaps[i].meta.build, snaps[i + 1].meta.build
+            if new_b and old_b and new_b != old_b:
+                if new_b != ack:
+                    build_update = {
+                        "fromBuild": old_b, "toBuild": new_b,
+                        "atRev": snaps[i].commit, "beforeRev": snaps[i + 1].commit,
+                        "date": snaps[i].author_date,
+                        "files": self._files_clean(snaps[i].meta.files),
+                    }
+                break  # only the most recent build change
 
         pending = [{"name": n, "kind": k} for n, k in sorted(tracker.live_changes().items())]
 
@@ -273,6 +294,8 @@ class GuiApi:
             pending=pending,
             lastKnownGood=last_known_good,
             tracked=tracked,
+            currentBuild=current_build,
+            buildUpdate=build_update,
             snapshotCount=snapshot_count,
             protected=protected,
             trayEnabled=bool(self._ui_prefs(cfg).get("tray", True)),
@@ -1282,6 +1305,20 @@ class GuiApi:
         except OSError as exc:
             return _err(str(exc))
         return _ok(tray=bool(on))
+
+    def ack_build(self, build: str) -> dict:
+        """Dismiss the 'iRacing updated' notice for a given build."""
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        prefs = self._ui_prefs(cfg)
+        prefs["ackBuild"] = build
+        try:
+            cfg.state_dir.mkdir(parents=True, exist_ok=True)
+            (cfg.state_dir / "ui.json").write_text(json.dumps(prefs, indent=2), encoding="utf-8")
+        except OSError as exc:
+            return _err(str(exc))
+        return _ok()
 
     def check_for_update(self) -> dict:
         from irtracker import updater

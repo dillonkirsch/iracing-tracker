@@ -138,9 +138,10 @@ class Tracker:
 
         message = message or self._profile_switch_message(changes)
 
+        from irtracker import build as _build
         meta = SnapshotMeta(
             trigger=trigger, files=changes, sim_running=sim_running,
-            car=car, track=track, message=message,
+            car=car, track=track, message=message, build=_build.current_build(),
             time=datetime.now().astimezone().isoformat(timespec="seconds"),
         )
 
