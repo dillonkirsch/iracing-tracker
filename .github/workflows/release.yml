@@ -68,6 +68,7 @@ jobs:
           --collect-all fpdf
           --collect-all pystray
           --collect-all PIL
+          --collect-all cryptography
           packaging/launcher.py
 
       - name: Generate SHA-256 checksum
