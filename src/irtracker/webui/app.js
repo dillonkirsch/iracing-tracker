@@ -222,6 +222,109 @@ function infoModal({ title, bodyHtml }) {
   root.querySelector(".modal-bg").onclick = (e) => { if (e.target.classList.contains("modal-bg")) done(); };
 }
 
+async function doExportRecipe() {
+  const r = await api("recipe_sources");
+  const sources = (r.ok && r.items) || [];
+  if (!sources.length) { toast("No settings files to share yet.", "bad"); return; }
+  const root = $("#modalRoot");
+  const sectionsFor = (file) => (sources.find((s) => s.file === file) || sources[0]).sections;
+  const secHtml = (file) => sectionsFor(file).map((sec) =>
+    `<label class="row-gap" style="font-size:13px;gap:7px"><input type="checkbox" class="recSec" value="${esc(sec)}" checked> ${esc(sec)}</label>`).join("");
+  root.innerHTML = `<div class="modal-bg"><div class="modal" style="max-width:480px">
+    <h3>Share settings as a recipe</h3>
+    <p>Pick a settings file and which sections to include. Recipes are settings only — no device or personal info.</p>
+    <select class="modal-input" id="recFile">${sources.map((s, i) => `<option value="${esc(s.file)}"${i ? "" : " selected"}>${esc(fileLabel(s.file))} (${esc(s.file)})</option>`).join("")}</select>
+    <input class="modal-input" id="recName" placeholder="Name it, e.g. VR graphics">
+    <div class="section-label" style="margin:4px 0 6px">Sections</div>
+    <div id="recSections" style="max-height:150px;overflow:auto;display:flex;flex-direction:column;gap:6px">${secHtml(sources[0].file)}</div>
+    <div class="modal-actions"><button class="btn btn-ghost" data-x="cancel">Cancel</button><button class="btn btn-primary" data-x="create">Create recipe</button></div>
+  </div></div>`;
+  const close = () => { root.innerHTML = ""; };
+  root.querySelector('[data-x="cancel"]').onclick = close;
+  root.querySelector(".modal-bg").onclick = (e) => { if (e.target.classList.contains("modal-bg")) close(); };
+  $("#recFile").onchange = (e) => { $("#recSections").innerHTML = secHtml(e.target.value); };
+  root.querySelector('[data-x="create"]').onclick = async () => {
+    const secs = [...root.querySelectorAll(".recSec:checked")].map((c) => c.value);
+    if (!secs.length) { toast("Pick at least one section.", "bad"); return; }
+    const ex = await api("export_recipe", $("#recName").value.trim(), $("#recFile").value, secs);
+    if (!ex.ok) { toast(ex.error, "bad"); return; }
+    state.recipeText = ex.text;
+    root.querySelector(".modal").innerHTML = `
+      <h3>Recipe ready — “${esc(ex.name)}”</h3>
+      <p>${ex.count} setting${ex.count === 1 ? "" : "s"} from ${esc(fileLabel(ex.file))}. Copy it, or share a link anyone can open.</p>
+      <textarea class="modal-input" readonly style="min-height:130px;font-family:Consolas,monospace;font-size:12px">${esc(ex.text)}</textarea>
+      <div id="recShareOut"></div>
+      <div class="modal-actions"><button class="btn btn-ghost" data-x="close">Close</button>
+        <button class="btn" data-x="copy">Copy</button>
+        <button class="btn btn-primary" data-x="share">Share via link</button></div>`;
+    const m = root.querySelector(".modal");
+    m.querySelector('[data-x="close"]').onclick = close;
+    m.querySelector('[data-x="copy"]').onclick = async () => {
+      try { await navigator.clipboard.writeText(state.recipeText); toast("Recipe copied.", "good"); }
+      catch (e) { toast("Select the text to copy it.", "bad"); }
+    };
+    m.querySelector('[data-x="share"]').onclick = () => {
+      $("#recShareOut").innerHTML = `<div class="card" style="margin-top:10px;padding:10px 12px;font-size:12.5px">
+        <span class="muted">${icon("alert")} This uploads to a public paste site — <b>anyone with the link can read it</b> (settings only, no personal info).</span>
+        <div class="row-gap" style="margin-top:8px"><button class="btn btn-sm btn-primary" id="recDoShare">Upload &amp; get link</button></div></div>`;
+      $("#recDoShare").onclick = async () => {
+        $("#recShareOut").innerHTML = `<div class="loading" style="padding:10px">Uploading…</div>`;
+        const sr = await api("share_recipe", state.recipeText);
+        if (!sr.ok) { $("#recShareOut").innerHTML = `<p class="muted" style="font-size:12.5px;margin-top:8px">${esc(sr.error)}</p>`; return; }
+        $("#recShareOut").innerHTML = `<div class="card" style="margin-top:10px;padding:10px 12px">
+          <div class="muted" style="font-size:12px">Share this link:</div>
+          <div class="row-gap" style="margin-top:5px"><input class="search" readonly value="${esc(sr.url)}" style="margin:0;flex:1"><button class="btn btn-sm" id="recCopyLink">Copy link</button></div></div>`;
+        $("#recShareOut").querySelector("input").onclick = (e) => e.target.select();
+        $("#recCopyLink").onclick = async () => { try { await navigator.clipboard.writeText(sr.url); toast("Link copied.", "good"); } catch (e) {} };
+      };
+    };
+  };
+}
+
+function doImportRecipe() {
+  const root = $("#modalRoot");
+  root.innerHTML = `<div class="modal-bg"><div class="modal" style="max-width:480px">
+    <h3>Import a recipe</h3>
+    <p>Paste a recipe, or load one from a share link. You'll see exactly what it changes before anything is applied.</p>
+    <textarea class="modal-input" id="impText" placeholder="Paste recipe text here…" style="min-height:104px;font-family:Consolas,monospace;font-size:12px"></textarea>
+    <div class="row-gap"><input class="search" id="impLink" placeholder="…or paste a share link" style="margin:0;flex:1"><button class="btn btn-sm" id="impLoad">Load</button></div>
+    <div id="impPreview"></div>
+    <div class="modal-actions"><button class="btn btn-ghost" data-x="cancel">Cancel</button><button class="btn btn-primary" id="impPreviewBtn">Preview changes</button></div>
+  </div></div>`;
+  const close = () => { root.innerHTML = ""; };
+  root.querySelector('[data-x="cancel"]').onclick = close;
+  root.querySelector(".modal-bg").onclick = (e) => { if (e.target.classList.contains("modal-bg")) close(); };
+  $("#impLoad").onclick = async () => {
+    const url = $("#impLink").value.trim();
+    if (!url) return;
+    $("#impPreview").innerHTML = `<div class="loading" style="padding:8px">Loading…</div>`;
+    const r = await api("fetch_recipe", url);
+    if (!r.ok) { $("#impPreview").innerHTML = `<p class="muted" style="font-size:12.5px;margin-top:6px">${esc(r.error)}</p>`; return; }
+    $("#impText").value = r.text; $("#impPreview").innerHTML = "";
+  };
+  $("#impPreviewBtn").onclick = async () => {
+    const text = $("#impText").value.trim();
+    if (!text) { toast("Paste a recipe or load a link first.", "bad"); return; }
+    const pv = await api("preview_recipe", text);
+    if (!pv.ok) { $("#impPreview").innerHTML = `<p class="muted" style="margin-top:8px;font-size:12.5px">${esc(pv.error)}</p>`; return; }
+    if (!pv.changes.length) {
+      $("#impPreview").innerHTML = `<div class="card" style="margin-top:10px;padding:10px 12px"><span class="muted" style="font-size:12.5px">${icon("shieldCheck")} Your ${esc(fileLabel(pv.file))} already matches this recipe — nothing to change.</span></div>`;
+      return;
+    }
+    const rows = pv.changes.map((c) => `<div class="file-row" style="padding:5px 0;gap:8px"><div style="flex:1">${esc(c.section)} · ${esc(c.key)}</div><span class="bind unbound">${esc(c.old == null ? "(not set)" : c.old)}</span><span class="muted">→</span><span class="bind key">${esc(c.new)}</span></div>`).join("");
+    $("#impPreview").innerHTML = `<div class="card" style="margin-top:10px;padding:10px 12px">
+      <div class="section-label" style="margin-bottom:6px">“${esc(pv.name || "recipe")}” will change ${pv.changes.length} setting${pv.changes.length === 1 ? "" : "s"} in ${esc(fileLabel(pv.file))}</div>
+      ${rows}
+      <div class="row-gap" style="margin-top:10px"><button class="btn btn-sm btn-primary" id="impApply">Apply these changes</button></div></div>`;
+    $("#impApply").onclick = async () => {
+      const r = await api("apply_recipe", text);
+      if (!r.ok && r.simBlocked) { toast(r.error, "bad"); return; }
+      if (!r.ok) { toast(r.error, "bad"); return; }
+      toast(r.message, "good"); close(); await refreshAll();
+    };
+  };
+}
+
 function noteModal(current) {
   return new Promise((resolve) => {
     const root = $("#modalRoot");
@@ -1155,8 +1258,12 @@ async function renderGameSettings() {
   }
   const lint = await api("run_config_lint");
   content.innerHTML = `
-    <div class="page-head"><h1 class="page-title">Game Settings</h1>
+    <div class="page-head spread"><div><h1 class="page-title">Game Settings</h1>
       <p class="page-sub">Your iRacing config values. Search a setting and click it to see when it last changed. Read-only — change these inside iRacing.</p></div>
+      <div class="row-gap">
+        <button class="btn btn-sm" data-action="recipe-export">${icon("zip")} Share settings…</button>
+        <button class="btn btn-sm" data-action="recipe-import">${icon("doc")} Import…</button>
+      </div></div>
     ${lintCard(lint)}
     <input class="search" id="setSearch" placeholder="Find a setting (e.g. memory, FOV, mirror, fps)…" value="${esc(state.settingsQuery || "")}">
     <div id="setResults"></div>`;
@@ -1799,6 +1906,8 @@ document.addEventListener("click", (e) => {
   if (a === "tracked-add") return doTrackedAdd();
   if (a === "tracked-remove") return doTrackedRemove(+btn.dataset.i);
   if (a === "tracked-save") return doTrackedSave();
+  if (a === "recipe-export") return doExportRecipe();
+  if (a === "recipe-import") return doImportRecipe();
   if (a === "binding-inventory") return doBindingInventory();
   if (a === "copy-inventory") return copyInventory();
   if (a === "blame-control") return doBlameControl(btn.dataset.name);

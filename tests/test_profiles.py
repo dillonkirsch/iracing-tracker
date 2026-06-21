@@ -373,6 +373,30 @@ def test_build_update_detection(tmp_path, monkeypatch):
     assert api.get_overview()["buildUpdate"] is None
 
 
+def test_apply_recipe_end_to_end(tmp_path):
+    from irtracker.gui import GuiApi
+    from irtracker.semdiff import parse_ini
+    ira = tmp_path / "iRacing"; ira.mkdir()
+    (ira / "app.ini").write_text(
+        "[Graphics]\nFieldOfView=100\nmirrorQuality=2\n\n[Audio]\nvol=80\n", encoding="utf-8")
+    cfgp = tmp_path / "config.toml"
+    cfgp.write_text(f'[paths]\niracing_dir = "{ira.as_posix()}"\n'
+                    f'data_dir = "{(tmp_path / "data").as_posix()}"\n'
+                    f'[watcher]\nsim_processes = ["___no_such_sim___.exe"]\n', encoding="utf-8")
+    api = GuiApi(str(cfgp))
+    text = api.export_recipe("VR graphics", "app.ini", ["Graphics"])["text"]
+    # a different machine has other values
+    (ira / "app.ini").write_text(
+        "[Graphics]\nFieldOfView=90\nmirrorQuality=4\n\n[Audio]\nvol=80\n", encoding="utf-8")
+    assert len(api.preview_recipe(text)["changes"]) == 2
+    assert api.apply_recipe(text)["applied"] == 2
+    now = parse_ini((ira / "app.ini").read_text(encoding="utf-8"))
+    assert now["Graphics"] == {"FieldOfView": "100", "mirrorQuality": "2"}
+    assert now["Audio"]["vol"] == "80"            # untouched section
+    # reapplying is a no-op
+    assert api.apply_recipe(text)["applied"] == 0
+
+
 def test_migrates_legacy_bare_keys_into_active_profile(cfg, corpus_cfg_bytes):
     # 1) legacy install: controls.cfg at the top level, no profiles yet
     (cfg.iracing_dir / "controls.cfg").write_bytes(corpus_cfg_bytes)

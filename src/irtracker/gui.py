@@ -1427,6 +1427,128 @@ class GuiApi:
         self._cfg_error = None
         return _ok(message="Saved which files are backed up.")
 
+    # -- config recipes (shareable subset of settings) -------------------------
+
+    def recipe_sources(self) -> dict:
+        """The settings files (and their sections) a recipe can be built from."""
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        from irtracker.semdiff import parse_ini
+        out = []
+        for name in cfg.tracked_files_present():
+            if not name.lower().endswith(".ini"):
+                continue
+            try:
+                sections = list(parse_ini(
+                    cfg.live_path(name).read_text(encoding="utf-8", errors="replace")))
+            except OSError:
+                continue
+            if sections:
+                out.append({"file": name, "label": name, "sections": sections})
+        return _ok(items=out)
+
+    def export_recipe(self, name: str, file: str, sections: list | None = None) -> dict:
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        from irtracker import recipes
+        from irtracker.semdiff import parse_ini
+        if not file or not file.lower().endswith(".ini"):
+            return _err("Pick a settings (.ini) file to share.")
+        path = cfg.live_path(file)
+        if not path.exists():
+            return _err(f"No {file} found in your iRacing folder.")
+        try:
+            parsed = parse_ini(path.read_text(encoding="utf-8", errors="replace"))
+        except OSError as exc:
+            return _err(str(exc))
+        secs = [s for s in (sections or list(parsed)) if s in parsed]
+        if not secs:
+            return _err("Pick at least one section to include.")
+        recipe = recipes.build_recipe(name, file, parsed, secs)
+        if not recipe["values"]:
+            return _err("Those sections have no settings to share.")
+        return _ok(text=recipes.recipe_json(recipe), name=recipe["name"],
+                   count=len(recipe["values"]), file=file)
+
+    def preview_recipe(self, text: str) -> dict:
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        from irtracker import recipes
+        from irtracker.semdiff import parse_ini
+        try:
+            recipe = recipes.parse_recipe(text)
+        except ValueError as exc:
+            return _err(str(exc))
+        path = cfg.live_path(recipe["file"])
+        current = {}
+        if path.exists():
+            try:
+                current = parse_ini(path.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                current = {}
+        return _ok(name=recipe.get("name"), file=recipe["file"],
+                   total=len(recipe.get("values", [])),
+                   changes=recipes.recipe_changes(recipe, current),
+                   fileExists=path.exists())
+
+    def apply_recipe(self, text: str) -> dict:
+        tracker = self._tracker()
+        if tracker is None:
+            return _err(self._cfg_error or "could not load configuration")
+        cfg = tracker.cfg
+        from irtracker import recipes
+        from irtracker.semdiff import parse_ini
+        try:
+            recipe = recipes.parse_recipe(text)
+        except ValueError as exc:
+            return _err(str(exc))
+        file = recipe["file"]
+        if not file.lower().endswith(".ini"):
+            return _err("Recipes can only change settings (.ini) files.")
+        if sim_running(cfg.sim_processes):
+            return _err("Can't change settings while iRacing is running. Close the "
+                        "sim (and the iRacing UI) first, then try again.", simBlocked=True)
+        path = cfg.live_path(file)
+        if not path.exists():
+            return _err(f"You don't have a {file} to apply this to yet.")
+        try:
+            cur_text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return _err(str(exc))
+        changes = recipes.recipe_changes(recipe, parse_ini(cur_text))
+        if not changes:
+            return _ok(applied=0, message="Your settings already match this recipe.")
+        tracker.take_snapshot("pre_restore",
+                              message=f'before applying recipe "{recipe.get("name")}"')
+        patch = {(c["section"], c["key"]): c["new"] for c in changes}
+        try:
+            path.write_text(recipes.patch_ini_text(cur_text, patch), encoding="utf-8")
+        except OSError as exc:
+            return _err(str(exc))
+        tracker.take_snapshot(
+            "manual", names={file},
+            message=f'applied recipe "{recipe.get("name")}" ({len(changes)} settings)')
+        return _ok(applied=len(changes),
+                   message=f"Applied {len(changes)} setting(s) from \"{recipe.get('name')}\".")
+
+    def share_recipe(self, text: str) -> dict:
+        from irtracker import paste
+        try:
+            return _ok(url=paste.share(text))
+        except Exception as exc:
+            return _err(f"Couldn't reach the share service ({exc}). "
+                        f"You can still copy the recipe text and share it yourself.")
+
+    def fetch_recipe(self, url: str) -> dict:
+        from irtracker import paste
+        try:
+            return _ok(text=paste.fetch(url))
+        except Exception as exc:
+            return _err(f"Couldn't load that link ({exc}).")
+
     def open_folder(self, which: str) -> dict:
         cfg = self._config()
         targets = {}
