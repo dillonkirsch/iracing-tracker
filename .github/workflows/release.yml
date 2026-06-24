@@ -1,12 +1,9 @@
 name: Build & Release
 
-# Every push to master builds the Windows .exe and publishes a GitHub Release
-# with an auto-incremented version number (major.minor taken from
-# pyproject.toml, plus a patch that climbs with each commit) and a short
-# bullet-point changelog generated from the commits since the last release.
-# Pushing a version tag (e.g. v1.2.3) publishes a release under that exact name
-# instead. Manual runs (workflow_dispatch) build the .exe as a downloadable
-# artifact without publishing a release.
+# Pushing a version tag (e.g. v1.2.3) builds the Windows .exe and publishes a
+# GitHub Release under that tag name with a short bullet-point changelog.
+# Pushes to master build the .exe as a CI artifact (no release published).
+# Manual runs (workflow_dispatch) also build the artifact without releasing.
 on:
   push:
     branches:
@@ -41,7 +38,7 @@ jobs:
             v="${{ github.ref_name }}"                       # use the pushed tag as-is
           else
             base=$(python -c "import re;m=re.search(r'^version\s*=\s*\"(\d+)\.(\d+)',open('pyproject.toml').read(),re.M);print(m.group(1)+'.'+m.group(2))")
-            v="v${base}.$(git rev-list --count HEAD)"        # major.minor + commit count
+            v="v${base}.$(git rev-list --count HEAD)"        # major.minor + commit count (artifact only)
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           printf 'VERSION = "%s"\n' "$v" > src/irtracker/_buildinfo.py
@@ -79,7 +76,7 @@ jobs:
 
       - name: Write release notes
         id: notes
-        if: github.event_name == 'push'
+        if: github.ref_type == 'tag'
         shell: bash
         env:
           VERSION: ${{ steps.ver.outputs.version }}
@@ -107,7 +104,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub Release
-        if: github.event_name == 'push'
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.version }}
