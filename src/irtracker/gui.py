@@ -989,6 +989,141 @@ class GuiApi:
             recent = self._recent_setting_changes(tracker, ini_files)
         return _ok(all=all_keys, recent=recent)
 
+    def search_history(self, query: str, file: str | None = None,
+                       limit: int = 100) -> dict:
+        """Configuration history search: find every snapshot where a key,
+        section, action, or value matched the query (ROADMAP "Configuration
+        history search").
+
+        Walks the git history of tracked INI/YAML files (and controls.cfg
+        actions) and returns matching changes, newest first. Each result is a
+        {file, section, key, old, new, date, trigger, car, track, message,
+        rev, contextLabel} dict — the same shape blame uses, but across all
+        keys instead of one. Optional ``file`` narrows to one tracked file.
+
+        For INI/YAML we diff consecutive versions and match on section, key,
+        or value. For controls.cfg we decode each version and match on action
+        name or binding value (the decoded view, never raw bytes).
+        """
+        tracker = self._tracker()
+        if tracker is None:
+            return _err(self._cfg_error or "could not load configuration")
+        repo = tracker.repo
+        if not repo.initialized or not repo.head():
+            return _ok(query=query, results=[])
+        q = (query or "").strip().lower()
+        if not q:
+            return _ok(query=query, results=[])
+        cfg = tracker.cfg
+        from irtracker.semdiff import ADDED, REMOVED, CHANGED, diff_ini, diff_yaml, describe_binding
+
+        # Decide which files to search.
+        if file:
+            candidates = [file]
+        else:
+            candidates = sorted(
+                n for n in (repo.tracked_in_worktree() or cfg.tracked_files_present())
+                if not is_sidecar(n))
+        results: list[dict] = []
+        # Per-file walking (oldest -> newest so diffs are forward).
+        for name in candidates:
+            low = name.lower()
+            snaps = repo.log(path=name, follow=True)
+            if not snaps:
+                continue
+            is_ini = low.endswith(".ini")
+            is_yaml = low.endswith((".yaml", ".yml"))
+            is_controls = low == "controls.cfg" or "controls.cfg" in low
+            if not (is_ini or is_yaml or is_controls):
+                continue
+
+            # Build the ordered list of (snapshot, content) and diff adjacent
+            # pairs. We match on the CHANGE itself (section/key + old/new for
+            # INI/YAML, action + old/new binding for controls).
+            seq = []
+            for s in reversed(snaps):  # oldest first
+                if is_controls:
+                    data = None
+                    for key_name in (name, "controls.cfg"):
+                        try:
+                            data = repo.show_file(s.commit, key_name)
+                            break
+                        except GitError:
+                            continue
+                    if data is None:
+                        continue
+                    try:
+                        doc = codec.decode_bytes(data)
+                    except GfccError:
+                        continue
+                    seq.append((s, doc))
+                else:
+                    text = self._text_at(repo, s.commit, name)
+                    if text is None:
+                        continue
+                    seq.append((s, text))
+
+            for i in range(1, len(seq)):
+                s_new = seq[i][0]
+                if is_controls:
+                    old_doc, new_doc = seq[i - 1][1], seq[i][1]
+                    old_e = {e["name"]: e for e in old_doc["controls"]["entries"]}
+                    new_e = {e["name"]: e for e in new_doc["controls"]["entries"]}
+                    for action in list(old_e) + [a for a in new_e if a not in old_e]:
+                        o, n = old_e.get(action), new_e.get(action)
+                        if o is None and n is not None:
+                            kind, old_v, new_v = ADDED, None, describe_binding(n)
+                        elif o is not None and n is None:
+                            kind, old_v, new_v = REMOVED, describe_binding(o), None
+                        elif o != n:
+                            kind = CHANGED
+                            old_v = describe_binding(o)
+                            new_v = describe_binding(n)
+                            # device GUID drift only — not a value match
+                            if old_v == new_v:
+                                continue
+                        else:
+                            continue
+                        # match on action name or old/new binding value
+                        hay = f"{action} {old_v or ''} {new_v or ''}".lower()
+                        if q not in hay:
+                            continue
+                        results.append({
+                            "file": name, "section": "", "key": action,
+                            "kind": kind, "old": old_v, "new": new_v,
+                            "date": s_new.author_date,
+                            "trigger": s_new.meta.trigger,
+                            "car": s_new.meta.car, "track": s_new.meta.track,
+                            "message": s_new.meta.message, "rev": s_new.commit,
+                            "contextLabel": s_new.meta.context_label(),
+                        })
+                else:
+                    old_text, new_text = seq[i - 1][1], seq[i][1]
+                    if is_ini:
+                        changes = diff_ini(old_text, new_text)
+                    else:
+                        changes = diff_yaml(old_text, new_text)
+                    for ch in changes:
+                        hay = f"{ch.section} {ch.key} {ch.old or ''} {ch.new or ''}".lower()
+                        if q not in hay:
+                            continue
+                        results.append({
+                            "file": name, "section": ch.section, "key": ch.key,
+                            "kind": ch.kind, "old": ch.old, "new": ch.new,
+                            "date": s_new.author_date,
+                            "trigger": s_new.meta.trigger,
+                            "car": s_new.meta.car, "track": s_new.meta.track,
+                            "message": s_new.meta.message, "rev": s_new.commit,
+                            "contextLabel": s_new.meta.context_label(),
+                        })
+            if len(results) >= limit:
+                break
+
+        # newest first; cap at limit
+        results.sort(key=lambda r: r["date"], reverse=True)
+        results = results[:limit]
+        return _ok(query=query, file=file, results=results)
+
     def identify_input(self, query: str, profile: str | None = None) -> dict:
         """Reverse lookup: what action(s) a key/button/axis is bound to."""
         cfg = self._config()

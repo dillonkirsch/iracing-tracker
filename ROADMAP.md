@@ -39,6 +39,7 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 | **Config blame (controls + settings)** | "When did this last change?" — click any control (Controls & Devices) **or** any INI setting (the new **Game Settings** view) to see its full change timeline: each value with when, the trigger (manual / sim-exit / auto), car/track context, and the backup note; current value tagged "now". Game Settings defaults to "recently changed settings" (value changes only, ignored keys filtered) and has a search across all INI keys. Walks the file's git history (controls rename-aware via `git log --follow`). `GuiApi.blame_control` / `blame_setting` / `list_settings`. |
 | **Known-good restore points** | Mark the current setup as "verified good in a real session" (a reserved `known-good/<timestamp>` tag namespace, kept separate from Saved Setups), then one-click **Revert to last known-good** from the Home dashboard. A "✓ Known-good" badge appears on those backups in History. Built on tags + `restore_baseline`; revert is sim-running-guarded + takes a safety backup first. |
 | **iRacing Control Profiles support** | iRacing's Control Profiles feature (May 2026) relocated controls.cfg/joyCalib.yaml into `profiles\controls\<name>\`, with the active profile named in `app.ini [ControlProfiles] Global`. The tracker resolves the live files through the active profile **and versions every profile independently** (one history per profile via `profiles/controls/<name>/…` repo keys), labels active-profile switches in history, and migrates pre-profiles history in place (rename, not delete+add). Per-profile labels in the UI (e.g. "Controls & Force Feedback · Oval profile"). The Controls & Devices view has a **profile picker** to browse any control profile's bindings/devices without switching the active one in-sim (default = active; a banner warns when viewing a non-active profile). The app's own tag-based feature was renamed **"Saved Setups"** to avoid the name clash. |
+| **Configuration history search** | Search across every backup for changes matching a word: a section name, INI key, controls action, or value. Results are grouped by backup (newest first), each showing the old → new value with car/track context, and clicking one opens that backup's detail. A new **Search** tab in Backup History (alongside List / Timeline / Sessions). Same history-walk machinery as blame, generalized across all keys. `GuiApi.search_history` + `irtrack search <query>` CLI. |
 
 ---
 
@@ -57,7 +58,6 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 
 | Feature | Value | Effort | Foundation / notes |
 |---|---|---|---|
-| **Configuration history search** — find every snapshot where a key/section/action/value changed. | Med | Medium | Same history-walk machinery as blame. |
 | **Session outcome linking** — poll incidents / best lap at sim exit and store with the snapshot ("FFB I used for my Spa PB"). | Med | Medium | Already poll pyirsdk for car/track (FR-6); extend to results. |
 
 ---

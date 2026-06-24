@@ -545,6 +545,37 @@ def cmd_devices(args) -> int:
     return 0
 
 
+def cmd_search(args) -> int:
+    """Configuration history search: find every snapshot where a key, section,
+    action, or value matched the query."""
+    from irtracker.gui import GuiApi
+    api = GuiApi(args.config)
+    r = api.search_history(args.query, file=args.file, limit=args.limit)
+    if not r.get("ok"):
+        return _fail(r.get("error", "search failed"))
+    results = r["results"]
+    if not results:
+        print(f'no changes matching "{args.query}" found in history')
+        return 0
+    print(f'{len(results)} change(s) matching "{args.query}" — newest first:\n')
+    for i, res in enumerate(results):
+        loc = f"[{res['section']}] {res['key']}" if res["section"] else res["key"]
+        old_v = res.get("old") or "(none)"
+        new_v = res.get("new") or "(none)"
+        kind = res.get("kind", "changed")
+        arrow = {"added": "+", "removed": "-", "changed": "→"}.get(kind, "→")
+        print(f"{_fmt_date(res['date'])}  {res['rev'][:8]}  {res['file']}")
+        print(f"          {loc}: {old_v} {arrow} {new_v}")
+        ctx = res.get("contextLabel", "")
+        if ctx and ctx != "manual edit":
+            print(f"          ({ctx})")
+        if res.get("message"):
+            print(f'          "{res["message"]}"')
+        if i < len(results) - 1:
+            print()
+    return 0
+
+
 def cmd_doctor(args) -> int:
     cfg = _load(args)
     from irtracker.doctor import FAIL, OK, WARN, run_checks, summarize
@@ -733,6 +764,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("doctor", help="health check: confirm backups, watcher, decoder, and deps are OK")
     _add_common(p)
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("search", help="search history: find every snapshot where a key/section/value changed")
+    _add_common(p)
+    p.add_argument("query", help="text to search for (section, key, action, or value)")
+    p.add_argument("--file", help="narrow to one tracked file")
+    p.add_argument("-n", "--limit", type=int, default=100)
+    p.set_defaults(func=cmd_search)
 
     p = sub.add_parser("gui", help="open the friendly desktop app (native window or browser)")
     _add_common(p)

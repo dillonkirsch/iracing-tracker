@@ -109,6 +109,7 @@ const ICONS = {
   moon: '<path d="M21 12.8A8 8 0 1 1 11.2 3a6 6 0 0 0 9.8 9.8z"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
   timeline: '<path d="M5 4v16"/><circle cx="5" cy="8" r="2"/><circle cx="5" cy="16" r="2"/><path d="M9 8h11M9 16h11"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
 };
 function fileIconName(name) {
   const base = keyBase(name);
@@ -362,7 +363,9 @@ const state = {
   showUnbound: false,
   settings: null,
   settingsQuery: "",
-  historyView: "list",  // "list" | "timeline"
+  historyView: "list",  // "list" | "timeline" | "sessions" | "search"
+  historySearchQuery: "",
+  historySearchResults: null,
 };
 
 /* --------------------------------------------------------------- data loads */
@@ -628,6 +631,7 @@ async function renderHistory() {
     <button class="${v === "list" ? "on" : ""}" data-action="hview-list">${icon("list")} List</button>
     <button class="${v === "timeline" ? "on" : ""}" data-action="hview-timeline">${icon("timeline")} Timeline</button>
     <button class="${v === "sessions" ? "on" : ""}" data-action="hview-sessions">${icon("clock")} Sessions</button>
+    <button class="${v === "search" ? "on" : ""}" data-action="hview-search">${icon("search")} Search</button>
   </div>`;
   content.innerHTML = `
     <div class="page-head spread">
@@ -647,6 +651,7 @@ function renderHistBody() {
   const box = $("#histBody");
   if (!box) return;
   if (state.historyView === "sessions") { renderSessions(); return; }
+  if (state.historyView === "search") { renderHistorySearch(); return; }
   if (state.historyView === "timeline") {
     box.innerHTML = timelineChartHtml();
     box.querySelectorAll(".tlc-evt").forEach((el) =>
@@ -659,6 +664,93 @@ function renderHistBody() {
     <div class="timeline" id="timeline"></div>`;
   $("#histSearch").addEventListener("input", (e) => renderTimeline(e.target.value));
   renderTimeline("");
+}
+
+/* ---- history search: find every change matching a query ---- */
+function renderHistorySearch() {
+  const box = $("#histBody");
+  if (!box) return;
+  const q = state.historySearchQuery || "";
+  box.innerHTML = `
+    <div class="page-head" style="margin-bottom:14px">
+      <p class="page-sub" style="margin:0">Search across every backup for changes to a setting, action, or value — see exactly when it changed and what it changed to.</p>
+    </div>
+    <input class="search" id="histSearchInput" placeholder="Search changes (e.g. steeringDampingFactor, FOV, Alt+P, memory…)…" value="${esc(q)}">
+    <div id="searchResults"></div>`;
+  const inp = $("#histSearchInput");
+  inp.addEventListener("keydown", (e) => { if (e.key === "Enter") doHistorySearch(inp.value); });
+  // If we already have results, show them; otherwise focus the input.
+  if (state.historySearchResults) {
+    renderSearchResults(state.historySearchResults, q);
+  } else {
+    inp.focus();
+  }
+}
+
+async function doHistorySearch(query) {
+  const q = (query || "").trim();
+  state.historySearchQuery = q;
+  const box = $("#searchResults");
+  if (!box) return;
+  if (!q) { box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="loading">Searching history…</div>`;
+  const r = await api("search_history", q);
+  if (!r.ok) { box.innerHTML = `<p class="muted">${esc(r.error)}</p>`; return; }
+  state.historySearchResults = r;
+  renderSearchResults(r, q);
+}
+
+function renderSearchResults(r, q) {
+  const box = $("#searchResults");
+  if (!box) return;
+  if (!r.results || !r.results.length) {
+    box.innerHTML = `<div class="card"><p class="muted mt-0">No changes matching “${esc(q)}” found in your backup history. Try a different word — section names, key names, action names, or values all work.</p></div>`;
+    return;
+  }
+  // Group by snapshot rev so multiple changes from one backup stay together.
+  const groups = {};
+  r.results.forEach((res) => {
+    const k = res.rev;
+    (groups[k] = groups[k] || []).push(res);
+  });
+  const orderedGroups = Object.keys(groups).map((rev) => {
+    const items = groups[rev];
+    const snap = state.history.find((s) => s.rev === rev);
+    return { rev, items, snap, date: items[0].date };
+  }).sort((a, b) => b.date.localeCompare(a.date));
+
+  box.innerHTML = `<p class="muted" style="font-size:12.5px;margin:0 0 14px">${r.results.length} change${r.results.length > 1 ? "s" : ""} across ${orderedGroups.length} backup${orderedGroups.length > 1 ? "s" : ""} — newest first.</p>` +
+    orderedGroups.map((g) => searchResultGroupHtml(g)).join("");
+  box.querySelectorAll("[data-rev]").forEach((el) =>
+    el.addEventListener("click", () => { state.selectedRev = el.dataset.rev; showBackupDetail(el.dataset.rev); }));
+}
+
+function searchResultGroupHtml(g) {
+  const trigger = g.snap ? triggerLabel(g.snap.trigger) : "Backup";
+  const ctx = g.items[0].contextLabel && g.items[0].contextLabel !== "manual edit" ? ` · ${esc(g.items[0].contextLabel)}` : "";
+  const note = g.snap && g.snap.note ? ` — “${esc(g.snap.note)}”` : "";
+  return `<div class="card" style="margin-bottom:12px;cursor:pointer" data-rev="${esc(g.rev)}" title="Open this backup">
+    <div class="section-label mt-0" style="margin-bottom:8px">${icon("clock")} ${esc(fmtDate(g.date))} · ${esc(trigger)}${ctx}${note}</div>
+    ${g.items.map((res) => searchResultRowHtml(res)).join("")}
+  </div>`;
+}
+
+function searchResultRowHtml(res) {
+  const loc = res.section ? `${esc(res.section)} · ` : "";
+  const isControls = (res.file || "").toLowerCase().includes("controls.cfg");
+  const keyLabel = isControls ? esc(prettyAction(res.key)) : esc(res.key);
+  const oldV = res.old == null ? "(not set)" : esc(res.old);
+  const newV = res.new == null ? "(not set)" : esc(res.new);
+  const kind = res.kind || "changed";
+  const arrow = kind === "added" ? "+" : kind === "removed" ? "−" : "→";
+  const kindClass = kind === "added" ? "good" : kind === "removed" ? "bad" : "key";
+  return `<div class="file-row" style="align-items:flex-start">
+    <div class="file-ico">${icon(fileIconName(res.file))}</div>
+    <div style="flex:1">
+      <div class="file-name">${keyLabel} <span class="bind ${kindClass}" style="margin-left:6px">${oldV} ${arrow} ${newV}</span></div>
+      <div class="file-desc">${loc}${esc(fileLabel(res.file))}</div>
+    </div>
+  </div>`;
 }
 
 /* ---- configuration timeline (chart) ---- */
@@ -1911,6 +2003,7 @@ document.addEventListener("click", (e) => {
   if (a === "hview-list") { state.historyView = "list"; return renderHistory(); }
   if (a === "hview-timeline") { state.historyView = "timeline"; return renderHistory(); }
   if (a === "hview-sessions") { state.historyView = "sessions"; return renderHistory(); }
+  if (a === "hview-search") { state.historyView = "search"; return renderHistory(); }
   if (a === "toggle-session") return doSessionDetail(+btn.dataset.i);
   if (a === "goto-settings") return setView("settings");
   if (a === "open-iracing") return api("open_folder", "iracing");
