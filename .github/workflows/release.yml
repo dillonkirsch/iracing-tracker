@@ -2,12 +2,9 @@ name: Build & Release
 
 # Pushing a version tag (e.g. v1.2.3) builds the Windows .exe and publishes a
 # GitHub Release under that tag name with a short bullet-point changelog.
-# Pushes to master build the .exe as a CI artifact (no release published).
 # Manual runs (workflow_dispatch) also build the artifact without releasing.
 on:
   push:
-    branches:
-      - master
     tags:
       - "v*"
   workflow_dispatch:
