@@ -839,6 +839,65 @@ class GuiApi:
             })
         return out
 
+    def apply_bindings_gui(self, bindings: list, profile: str | None = None) -> dict:
+        """In-app controls editor: patch keyboard bindings into the live
+        controls.cfg and snapshot the change. Each binding is
+        {"action": str, "key": str, "modifiers": [str, ...]}.
+
+        Same safety as `gfcc encode --install`: refuses while the sim runs,
+        backs up the live file first, patches via apply_bindings (keyboard
+        only; axis/button binds are refused), and snapshots the result.
+        Returns the change lines and the snapshot commit.
+        """
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        if sim_running(cfg.sim_processes):
+            return _err("Can't change controls while iRacing is running. "
+                        "Close the sim and the iRacing UI, then try again.")
+        from irtracker.gfcc.patch import apply_bindings, BindingsError
+
+        view = profile if profile in cfg.control_profile_names() \
+            else active_control_profile(cfg.iracing_dir)
+        path = self._profile_file(cfg, "controls.cfg", view)
+        if not path.exists():
+            return _err("No controls.cfg found in your iRacing folder.")
+        try:
+            base = path.read_bytes()
+            doc = codec.decode_bytes(base)
+        except OSError as exc:
+            return _err(str(exc))
+        except GfccError as exc:
+            return _err(f"Couldn't read your controls file: {exc}")
+
+        try:
+            changes = apply_bindings(doc, bindings)
+            out_bytes = codec.build(doc)
+            codec.decode_bytes(out_bytes)  # self-check on the result
+        except BindingsError as exc:
+            return _err(str(exc))
+        except GfccError as exc:
+            return _err(f"Couldn't rebuild the controls file: {exc}")
+
+        backup = backup_live_file(cfg, "controls.cfg")
+        try:
+            path.write_bytes(out_bytes)
+        except OSError as exc:
+            return _err(f"Couldn't write the new controls file: {exc}")
+
+        # Snapshot the change so it enters history immediately.
+        tracker = Tracker(cfg)
+        running = sim_running(cfg.sim_processes)
+        context = ContextCache(cfg.state_dir).context
+        result = tracker.take_snapshot(
+            "manual", message="Edited keyboard bindings in the app",
+            sim_running=running,
+            car=context.car if running else None,
+            track=context.track if running else None)
+
+        return _ok(changes=changes, backup=str(backup) if backup else None,
+                   commit=result.commit[:8] if result.committed else None)
+
     def blame_control(self, action: str, profile: str | None = None) -> dict:
         """When did a control's binding last change? Walks the controls.cfg
         history (rename-aware) for one action and returns its change timeline,

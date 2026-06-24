@@ -110,6 +110,7 @@ const ICONS = {
   list: '<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
   timeline: '<path d="M5 4v16"/><circle cx="5" cy="8" r="2"/><circle cx="5" cy="16" r="2"/><path d="M9 8h11M9 16h11"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+  edit: '<path d="M4 20h4L18.5 9.5a2.83 2.83 0 0 0-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/>',
 };
 function fileIconName(name) {
   const base = keyBase(name);
@@ -360,6 +361,7 @@ const state = {
   devices: null,
   controlsFilter: "",
   controlsProfile: null,  // which iRacing control profile the Controls view shows
+  controlsEditMode: false,
   showUnbound: false,
   settings: null,
   settingsQuery: "",
@@ -994,11 +996,18 @@ async function renderControls() {
     ? `<select class="search" id="ctlProfile" style="max-width:200px;margin:0" title="View a control profile">
         ${c.profiles.map((p) => `<option value="${esc(p)}"${p === c.profile ? " selected" : ""}>${esc(p)}${p === c.activeProfile ? " (active)" : ""}</option>`).join("")}
       </select>` : "";
+  const editBtn = state.controlsEditMode
+    ? `<button class="btn btn-sm btn-primary" data-action="toggle-edit">${icon("shieldCheck")} Done editing</button>`
+    : `<button class="btn btn-sm" data-action="toggle-edit">${icon("edit")} Edit keyboard binds</button>`;
+  const subtitle = state.controlsEditMode
+    ? "Click a keyboard control, then press the key you want. Wheel/pedal binds are protected — change those in iRacing."
+    : "How your wheel, pedals, and keyboard are mapped in iRacing. This view is read-only.";
   content.innerHTML = `
     <div class="page-head spread"><div><h1 class="page-title">Controls &amp; Devices</h1>
-      <p class="page-sub">How your wheel, pedals, and keyboard are mapped in iRacing. This view is read-only.</p></div>
+      <p class="page-sub">${subtitle}</p></div>
       <div class="row-gap">${profileSelect}
         <button class="btn btn-sm" data-action="binding-inventory">${icon("doc")} Inventory</button>
+        ${editBtn}
         <button class="btn btn-sm" data-action="refresh-controls">${icon("rotate")} Refresh</button></div></div>
     ${savedStateBanner(c)}
     <div class="card" style="padding:14px;margin-bottom:16px;display:flex;gap:12px;align-items:flex-start">
@@ -1103,6 +1112,72 @@ async function doBlameControl(action) {
   showBlame(`${prettyAction(action)} — history`, await api("blame_control", action, state.controlsProfile));
 }
 
+function doEditBinding(action) {
+  const b = (state.controls.bindings || []).find((x) => x.action === action);
+  if (!b) return;
+  const current = b.display || "Not assigned";
+  const root = $("#modalRoot");
+  root.innerHTML = `<div class="modal-bg"><div class="modal" style="max-width:420px">
+    <h3>Edit keyboard binding</h3>
+    <p class="muted" style="font-size:13px;margin:4px 0 12px">${esc(prettyAction(action))}</p>
+    <p class="muted" style="font-size:12.5px;margin:0 0 8px">Current: <span class="bind key">${esc(current)}</span></p>
+    <div class="section-label" style="margin:14px 0 6px">Press the new key combination</div>
+    <div id="editKeycap" class="keycap" tabindex="0" style="text-align:center;font-size:18px;padding:20px">Click here, then press a key…</div>
+    <div id="editPreview" style="margin-top:12px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" data-x="cancel">Cancel</button>
+      <button class="btn btn-primary" data-x="apply" disabled>Apply</button>
+    </div>
+  </div></div>`;
+
+  const close = () => { root.innerHTML = ""; };
+  root.querySelector('[data-x="cancel"]').onclick = close;
+  root.querySelector(".modal-bg").onclick = (e) => { if (e.target.classList.contains("modal-bg")) close(); };
+
+  let captured = null;  // {key, modifiers, label}
+  const cap = root.querySelector("#editKeycap");
+  const applyBtn = root.querySelector('[data-x="apply"]');
+  const preview = root.querySelector("#editPreview");
+
+  cap.addEventListener("keydown", (ev) => {
+    ev.preventDefault();
+    const q = eventToQuery(ev);
+    if (!q) return;
+    const parts = q.split("+");
+    const key = parts.pop();
+    const modifiers = parts;
+    captured = {key, modifiers, label: q};
+    cap.textContent = q;
+    cap.style.background = "var(--accent-soft)";
+    preview.innerHTML = `<div class="card" style="padding:10px 14px"><span class="muted" style="font-size:12.5px">Will change from</span>
+      <span class="bind key" style="margin:0 6px">${esc(current)}</span>
+      <span class="muted" style="font-size:12.5px">to</span>
+      <span class="bind key" style="margin-left:6px">${esc(q)}</span></div>`;
+    applyBtn.disabled = false;
+  });
+  cap.addEventListener("focus", () => { if (!captured) cap.textContent = "Press any key…"; });
+  cap.addEventListener("blur", () => { if (!captured) cap.textContent = "Click here, then press a key…"; });
+  cap.focus();
+
+  applyBtn.onclick = async () => {
+    if (!captured) return;
+    applyBtn.disabled = true;
+    applyBtn.textContent = "Saving…";
+    const bindings = [{action, key: captured.key, modifiers: captured.modifiers}];
+    const r = await api("apply_bindings_gui", bindings, state.controlsProfile);
+    if (!r.ok) {
+      preview.innerHTML = `<div class="card conflict-banner" style="padding:10px 14px"><span style="color:var(--warn)">${esc(r.error)}</span></div>`;
+      applyBtn.disabled = false;
+      applyBtn.textContent = "Apply";
+      return;
+    }
+    close();
+    toast(`Saved: ${r.changes.join(", ")}`, "good");
+    if (r.commit) toast(`Backed up as ${r.commit}`, "good");
+    renderControls();  // refresh the view
+  };
+}
+
 function doBindingInventory() {
   const c = state.controls;
   if (!c || !c.bindings) { toast("Open Controls & Devices first.", "bad"); return; }
@@ -1204,12 +1279,28 @@ function renderCtlRows() {
   rows.sort((a, b) => (a.kind === "unbound") - (b.kind === "unbound"));
   const body = $("#ctlBody");
   if (!rows.length) { body.innerHTML = `<tr><td colspan="3" class="muted" style="padding:18px">No controls match your search.</td></tr>`; return; }
+  const editing = state.controlsEditMode;
   body.innerHTML = rows.map((b) => {
     const bad = conflicting.has(b.action);
-    return `<tr class="ctl-row ${bad ? "conflict" : ""}" data-action="blame-control" data-name="${esc(b.action)}" style="cursor:pointer" title="See when this control last changed">
+    const editable = editing && (b.kind === "key" || b.kind === "unbound");
+    const protected_ = editing && (b.kind === "axis" || b.kind === "button");
+    const rowAttrs = editing
+      ? (editable
+          ? `data-action="edit-binding" data-name="${esc(b.action)}" style="cursor:pointer" title="Click to rebind this key"`
+          : `style="opacity:0.6" title="Wheel/pedal binds are changed in iRacing, not here"`)
+      : `data-action="blame-control" data-name="${esc(b.action)}" style="cursor:pointer" title="See when this control last changed"`;
+    const editCell = editing
+      ? (editable
+          ? `<span class="bind key" style="cursor:pointer">${esc(b.display)} ${icon("edit", "ico")}</span>`
+          : protected_
+            ? `<span class="muted" style="font-size:12px">${icon("shield", "ico")} protected</span>`
+            : `<span class="bind ${b.kind}">${esc(b.display)}</span>`)
+      : `<span class="bind ${b.kind}">${esc(b.display)}</span>`;
+    const histIcon = editing ? "" : ` ${icon("clock", "ico ctl-hist")}`;
+    return `<tr class="ctl-row ${bad ? "conflict" : ""}" ${rowAttrs}>
       <td class="ctl-action">${esc(prettyAction(b.action))}${bad ? `<span class="conflict-badge">conflict</span>` : ""}</td>
-      <td><span class="bind ${b.kind}">${esc(b.display)}</span></td>
-      <td class="ctl-device">${esc(b.device || "—")} ${icon("clock", "ico ctl-hist")}</td></tr>`;
+      <td>${editCell}</td>
+      <td class="ctl-device">${esc(b.device || "—")}${histIcon}</td></tr>`;
   }).join("");
 }
 
@@ -2045,6 +2136,8 @@ document.addEventListener("click", (e) => {
   if (a === "blame-setting") return doBlameSetting(btn.dataset.file, btn.dataset.section, btn.dataset.key);
   if (a === "identify") return doIdentify(($("#identifyInput") || {}).value);
   if (a === "refresh-controls") return renderControls();
+  if (a === "toggle-edit") { state.controlsEditMode = !state.controlsEditMode; return renderControls(); }
+  if (a === "edit-binding") return doEditBinding(btn.dataset.name);
   if (a === "check-update") return doCheckUpdate(btn);
   if (a === "do-update") return doUpdate();
   if (a === "open-release") return api("open_url", (state.update || {}).url);
