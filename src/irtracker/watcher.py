@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from irtracker import notify
-from irtracker.config import Config
+from irtracker.config import Config, config_path, load_config
 from irtracker.repo import TRIGGER_LABELS, SnapshotMeta
 from irtracker.simstate import ContextCache, sim_running
 from irtracker.snapshot import Tracker
@@ -24,6 +24,10 @@ from irtracker.snapshot import Tracker
 log = logging.getLogger(__name__)
 
 HEARTBEAT_SECONDS = 5.0
+
+# How often the watcher reloads config.toml so GUI edits to file policies
+# (Track / Don't track / group repeats) take effect without a manual restart.
+CONFIG_RELOAD_SECONDS = 15.0
 
 
 # -- control files -------------------------------------------------------------
@@ -87,8 +91,12 @@ class Watcher:
         self._last_sdk_poll = 0.0
         self._last_rescan = time.monotonic()
         self._last_heartbeat = 0.0
+        self._last_config_reload = time.monotonic()
         self._last_snapshot: str | None = None
         self._started = datetime.now().astimezone().isoformat(timespec="seconds")
+        # Path the watcher loaded from, so periodic reloads pick up GUI edits
+        # (set in run() before the loop starts).
+        self._config_path = None
 
     # -- filesystem events ----------------------------------------------------
 
@@ -167,6 +175,28 @@ class Watcher:
 
     # -- main loop ----------------------------------------------------------------
 
+    def _reload_config(self) -> None:
+        """Reload config.toml from disk so GUI edits to file policies take
+        effect without restarting the watcher. Safe: paths and watcher tuning
+        are kept as-is mid-run (only the tracked set / policies refresh)."""
+        if self._config_path is None:
+            return
+        try:
+            fresh = load_config(self._config_path)
+        except Exception as exc:
+            log.warning("config reload failed (keeping old config): %s", exc)
+            return
+        old = {tp.pattern: tp.policy for tp in self.cfg.tracked}
+        new = {tp.pattern: tp.policy for tp in fresh.tracked}
+        if old == new:
+            return  # nothing changed
+        # Preserve runtime paths/tuning from the live config; only swap in the
+        # refreshed tracked set so a typo in the editor can't repoint the repo
+        # mid-run.
+        self.cfg.tracked = fresh.tracked
+        self.tracker.cfg = self.cfg
+        log.info("config reloaded: %d tracked patterns refreshed", len(self.cfg.tracked))
+
     def run(self) -> int:
         if watcher_alive(self.cfg):
             log.error("another watcher is already running (pid %s)",
@@ -176,6 +206,10 @@ class Watcher:
         if not self.cfg.iracing_dir.is_dir():
             log.error("iRacing folder not found: %s", self.cfg.iracing_dir)
             return 2
+
+        # Remember the path so the main loop can reload config.toml after GUI edits.
+        self._config_path = config_path()
+        self._last_config_reload = time.monotonic()
 
         self.tracker.ensure_repo()
         self._sim_was_running = self._sim_running_now()
@@ -209,6 +243,11 @@ class Watcher:
                     break
                 now = time.monotonic()
                 paused = _paused_flag(self.cfg).exists()
+
+                # Periodically reload config so GUI policy edits apply live.
+                if now - self._last_config_reload >= CONFIG_RELOAD_SECONDS:
+                    self._last_config_reload = now
+                    self._reload_config()
 
                 if was_paused and not paused:
                     log.info("resumed; running catch-up scan")

@@ -1641,7 +1641,7 @@ function renderSettings() {
 
     <p class="section-label" style="margin-top:22px">Files being protected</p>
     <div class="card">
-      <p class="muted mt-0" style="font-size:12.5px">Choose which iRacing files this app backs up. “Don’t track” stops backing a file up; “group repeats” squashes rapid repeated tweaks into one history entry. Applies to new backups — restart auto-backup (toggle above) to update the background watcher.</p>
+      <p class="muted mt-0" style="font-size:12.5px">Choose which iRacing files this app backs up. “Don’t track” stops backing a file up; “group repeats” squashes rapid repeated tweaks into one history entry. Changes apply to new backups within a minute — no need to restart auto-backup.</p>
       <div id="trackedEditor" style="margin-top:8px"></div>
       <div class="row-gap" style="margin-top:12px">
         <input class="search" id="newPattern" style="margin-bottom:0;flex:1;min-width:150px" placeholder="Add a file, e.g. replay.ini">
