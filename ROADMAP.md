@@ -51,7 +51,6 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 |---|---|---|---|
 | **In-app controls editor — FFB sliders** — strength / min-force / damping like the screenshot. | High | Hard | Blocked on reverse-engineering the opaque 147-byte `global_config_hex` blob. High payoff, real RE risk. |
 | **Per-car / per-track configs** — separate config sets per car and/or track combo. | High | Hard | iRacing controls are largely global; needs careful modelling. Pairs with profiles. |
-| **Car setup (`.sto`) tracking** — version per-car/track setups with the same engine. | High | Medium | New tracked-file patterns; out of v1 scope but probably the #1 user ask. |
 
 ---
 
@@ -71,19 +70,10 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 
 ---
 
-## 📤 Sharing & community
-
-| Feature | Value | Effort | Foundation / notes |
-|---|---|---|---|
-
----
-
 ## ☁️ Distribution & UX polish
 
 | Feature | Value | Effort | Foundation / notes |
 |---|---|---|---|
-| **Code-sign the exe** — kill the SmartScreen "unknown publisher" warning. | Med | Hard* | *Technically easy; needs a paid signing cert + process. |
-| **Cloud sync / multi-PC** — "back up to a private remote" button (survives reinstall; syncs PCs). | Med | Medium | Store is already a plain git repo. |
 | **In-sim overlay hook** — write a tiny JSON/text file (active config tag, e.g. `[FFB: Porsche GT3 Base]`) that SimHub/RaceLab can display. | Med | Easy | Just emit a status file. |
 
 ---
@@ -92,5 +82,6 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 
 | Feature | Value | Effort | Foundation / notes |
 |---|---|---|---|
+| **Car setup (.sto) tracking** — version per-car/track garage setups; compare/restore, and link the setup behind a PB. | High* | Hard | *Big general ask, but niche for drivers who don't save setups (Dillon's `setups\` is empty). Binary versioning/compare machinery already exists; needs reverse-engineering the `.sto` format for a semantic diff. |
 | **Telemetry-driven FFB suggestions** — parse `.ibt`, cross-reference clipping with FFB history to suggest strength tweaks. | High | Hard | Big new subsystem; depends on FFB decode landing first. |
 | **Decode the FFB/calibration blob** — unlocks the FFB editor, linter checks on FFB, and the above. | High | Hard | The single biggest enabler; pure reverse-engineering effort. |
