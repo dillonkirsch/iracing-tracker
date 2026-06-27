@@ -266,6 +266,51 @@ async function doExportRecipe() {
   };
 }
 
+async function doExportControls() {
+  const r = await api("export_controls_profile", state.controlsProfile);
+  if (!r.ok) { toast(r.error, "bad"); return; }
+  if (r.cancelled) return;
+  toast(r.message || "Exported.", "good");
+}
+
+function doImportControls() {
+  const root = $("#modalRoot");
+  root.innerHTML = `<div class="modal-bg"><div class="modal" style="max-width:480px">
+    <h3>Import a controls profile</h3>
+    <p>Pick a controls profile file (.json) that someone exported. You'll see exactly what's in it before anything changes.</p>
+    <input type="file" id="ctrlFile" accept=".json,application/json" class="modal-input">
+    <div id="ctrlImpPreview"></div>
+    <div class="modal-actions"><button class="btn btn-ghost" data-x="cancel">Cancel</button></div>
+  </div></div>`;
+  const close = () => { root.innerHTML = ""; };
+  root.querySelector('[data-x="cancel"]').onclick = close;
+  root.querySelector(".modal-bg").onclick = (e) => { if (e.target.classList.contains("modal-bg")) close(); };
+  $("#ctrlFile").onchange = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    let text;
+    try { text = await file.text(); } catch (err) { toast("Couldn't read that file.", "bad"); return; }
+    const pv = await api("preview_controls_import", text);
+    const box = $("#ctrlImpPreview");
+    if (!pv.ok) { box.innerHTML = `<p class="muted" style="font-size:12.5px;margin-top:8px">${esc(pv.error)}</p>`; return; }
+    const devs = (pv.devices || []).map((d) => esc(d.name)).join(", ") || "—";
+    const sample = (pv.sample || []).map((s) => `<div class="file-row" style="padding:3px 0;gap:8px"><div style="flex:1">${esc(s.action)}</div><span class="bind key">${esc(s.display)}</span></div>`).join("");
+    box.innerHTML = `<div class="card" style="margin-top:10px;padding:10px 12px">
+      <div class="section-label" style="margin-bottom:4px">“${esc(pv.name || "controls")}”${pv.build ? ` · iRacing ${esc(pv.build)}` : ""}</div>
+      <p class="muted mt-0" style="font-size:12.5px">${pv.bindingCount} assignments · devices: ${devs}${pv.hasJoyCalib ? " · includes pedal calibration" : ""}</p>
+      ${pv.deviceMismatch ? `<p style="font-size:12px;color:var(--warn);margin:6px 0 0">${icon("alert")} This profile is for different devices than yours. After importing, use “Re-map hardware” (in Devices) to connect the binds to your wheel/pedals.</p>` : ""}
+      ${sample ? `<div style="margin-top:8px;max-height:150px;overflow:auto">${sample}</div>` : ""}
+      <div class="card" style="margin-top:10px;padding:9px 11px;font-size:12px"><span class="muted">${icon("shield")} This replaces your current controls — a backup is saved first, so you can undo it from Backup History.</span></div>
+      <div class="row-gap" style="margin-top:10px"><button class="btn btn-sm btn-primary" id="ctrlDoImport">Import these controls</button></div></div>`;
+    $("#ctrlDoImport").onclick = async () => {
+      const r = await api("import_controls_profile", text, state.controlsProfile);
+      if (!r.ok && r.simBlocked) { toast(r.error, "bad"); return; }
+      if (!r.ok) { toast(r.error, "bad"); return; }
+      toast(r.message, "good"); close(); renderControls();
+    };
+  };
+}
+
 function doImportRecipe() {
   const root = $("#modalRoot");
   root.innerHTML = `<div class="modal-bg"><div class="modal" style="max-width:480px">
@@ -1006,6 +1051,8 @@ async function renderControls() {
     <div class="page-head spread"><div><h1 class="page-title">Controls &amp; Devices</h1>
       <p class="page-sub">${subtitle}</p></div>
       <div class="row-gap">${profileSelect}
+        <button class="btn btn-sm" data-action="export-controls">${icon("zip")} Export profile</button>
+        <button class="btn btn-sm" data-action="import-controls">${icon("doc")} Import profile</button>
         <button class="btn btn-sm" data-action="binding-inventory">${icon("doc")} Inventory</button>
         ${editBtn}
         <button class="btn btn-sm" data-action="refresh-controls">${icon("rotate")} Refresh</button></div></div>
@@ -2130,6 +2177,8 @@ document.addEventListener("click", (e) => {
   if (a === "tracked-save") return doTrackedSave();
   if (a === "recipe-export") return doExportRecipe();
   if (a === "recipe-import") return doImportRecipe();
+  if (a === "export-controls") return doExportControls();
+  if (a === "import-controls") return doImportControls();
   if (a === "binding-inventory") return doBindingInventory();
   if (a === "copy-inventory") return copyInventory();
   if (a === "blame-control") return doBlameControl(btn.dataset.name);

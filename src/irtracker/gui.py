@@ -898,6 +898,126 @@ class GuiApi:
         return _ok(changes=changes, backup=str(backup) if backup else None,
                    commit=result.commit[:8] if result.committed else None)
 
+    # -- share / import a controls profile (export to / import from a file) -----
+
+    def _controls_devices(self, doc, joycalib: str | None = None) -> list[dict]:
+        from irtracker.gfcc.devices import build_report
+        return [{"name": d.name or "Game controller", "guid": d.instance_guid}
+                for d in build_report(doc, joycalib).referenced]
+
+    def export_controls_profile(self, profile: str | None = None) -> dict:
+        """Save a control profile (controls.cfg + joyCalib.yaml) to a portable
+        .json file the user can keep or send to someone."""
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        from irtracker import build as build_mod, ctrlprofile
+        view = profile if profile in cfg.control_profile_names() \
+            else active_control_profile(cfg.iracing_dir)
+        cpath = self._profile_file(cfg, "controls.cfg", view)
+        if not cpath.exists():
+            return _err("No controls.cfg found to export.")
+        files: dict[str, bytes] = {}
+        try:
+            files["controls.cfg"] = cpath.read_bytes()
+            jc = self._profile_file(cfg, "joyCalib.yaml", view)
+            if jc.exists():
+                files["joyCalib.yaml"] = jc.read_bytes()
+        except OSError as exc:
+            return _err(str(exc))
+        devices = []
+        try:
+            devices = [d["name"] for d in self._controls_devices(codec.decode_bytes(files["controls.cfg"]))]
+        except GfccError:
+            pass
+        text = ctrlprofile.build_bundle(view or "controls", files,
+                                        build=build_mod.current_build(), devices=devices)
+        dest = self._save_dialog(f"{view or 'controls'}-controls.json",
+                                 "Controls profile (*.json)")
+        if dest is None:
+            return _ok(cancelled=True)
+        try:
+            Path(dest).write_text(text, encoding="utf-8")
+        except OSError as exc:
+            return _err(str(exc))
+        return _ok(path=str(dest), message=f"Saved controls profile to {dest}")
+
+    def preview_controls_import(self, text: str) -> dict:
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        from irtracker import ctrlprofile
+        try:
+            bundle = ctrlprofile.parse_bundle(text)
+        except ValueError as exc:
+            return _err(str(exc))
+        try:
+            doc = codec.decode_bytes(bundle["files"]["controls.cfg"])
+        except GfccError as exc:
+            return _err(f"The controls in this file couldn't be read ({exc}).")
+        bound = [b for b in self._bindings(doc) if b["kind"] != "unbound"]
+        devices = self._controls_devices(doc)
+        # Different machine? Compare the bundle's device GUIDs to your own.
+        my_guids: set = set()
+        mine = self._profile_file(cfg, "controls.cfg", active_control_profile(cfg.iracing_dir))
+        if mine.exists():
+            try:
+                my_guids = {d["guid"] for d in self._controls_devices(codec.decode_bytes(mine.read_bytes()))}
+            except (OSError, GfccError):
+                pass
+        bundle_guids = {d["guid"] for d in devices}
+        mismatch = bool(bundle_guids) and bool(my_guids) and bundle_guids.isdisjoint(my_guids)
+        return _ok(
+            name=bundle.get("name"), exportedAt=bundle.get("exportedAt"),
+            build=bundle.get("build"), bindingCount=len(bound), devices=devices,
+            hasJoyCalib="joyCalib.yaml" in bundle["files"], deviceMismatch=mismatch,
+            sample=[{"action": _pretty_action(b["action"]), "display": b["display"]}
+                    for b in bound[:14]])
+
+    def import_controls_profile(self, text: str, profile: str | None = None) -> dict:
+        """Install a controls profile from a bundle into the active (or given)
+        control profile. Safety-backed-up and snapshotted, so it's reversible."""
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        if sim_running(cfg.sim_processes):
+            return _err("Can't change controls while iRacing is running. Close the "
+                        "sim and the iRacing UI, then try again.", simBlocked=True)
+        from irtracker import ctrlprofile
+        try:
+            bundle = ctrlprofile.parse_bundle(text)
+        except ValueError as exc:
+            return _err(str(exc))
+        try:
+            codec.decode_bytes(bundle["files"]["controls.cfg"])  # validate before writing
+        except GfccError as exc:
+            return _err(f"The controls in this file couldn't be read ({exc}).")
+        view = profile if profile in cfg.control_profile_names() \
+            else active_control_profile(cfg.iracing_dir)
+        backup_live_file(cfg, "controls.cfg")
+        try:
+            cpath = self._profile_file(cfg, "controls.cfg", view)
+            cpath.parent.mkdir(parents=True, exist_ok=True)
+            cpath.write_bytes(bundle["files"]["controls.cfg"])
+            if "joyCalib.yaml" in bundle["files"]:
+                backup_live_file(cfg, "joyCalib.yaml")
+                jcpath = self._profile_file(cfg, "joyCalib.yaml", view)
+                jcpath.parent.mkdir(parents=True, exist_ok=True)
+                jcpath.write_bytes(bundle["files"]["joyCalib.yaml"])
+        except OSError as exc:
+            return _err(f"Couldn't write the controls file: {exc}")
+        tracker = Tracker(cfg)
+        running = sim_running(cfg.sim_processes)
+        context = ContextCache(cfg.state_dir).context
+        result = tracker.take_snapshot(
+            "manual", message=f"Imported controls profile \"{bundle.get('name')}\"",
+            sim_running=running, car=context.car if running else None,
+            track=context.track if running else None)
+        return _ok(name=bundle.get("name"),
+                   commit=result.commit[:8] if result.committed else None,
+                   message=f"Imported controls profile \"{bundle.get('name')}\". "
+                           f"Restart iRacing to use it.")
+
     def blame_control(self, action: str, profile: str | None = None) -> dict:
         """When did a control's binding last change? Walks the controls.cfg
         history (rename-aware) for one action and returns its change timeline,

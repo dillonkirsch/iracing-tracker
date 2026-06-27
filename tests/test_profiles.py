@@ -445,6 +445,38 @@ def test_discord_config_and_snapshot_hook(tmp_path, monkeypatch):
     assert not captured
 
 
+def test_controls_profile_export_import(tmp_path, corpus_cfg_bytes):
+    from irtracker.gui import GuiApi
+    from irtracker.gfcc import codec
+
+    def mkcfg(root, with_controls):
+        ira = root / "iRacing"; ira.mkdir(parents=True)
+        if with_controls:
+            (ira / "controls.cfg").write_bytes(corpus_cfg_bytes)
+        cfgp = root / "config.toml"
+        cfgp.write_text(f'[paths]\niracing_dir = "{ira.as_posix()}"\n'
+                        f'data_dir = "{(root / "data").as_posix()}"\n'
+                        f'[watcher]\nsim_processes = ["__none__.exe"]\n', encoding="utf-8")
+        return cfgp, ira
+
+    cfgA, _ = mkcfg(tmp_path / "A", with_controls=True)
+    apiA = GuiApi(str(cfgA))
+    dest = tmp_path / "export.json"
+    apiA._save_dialog = lambda n, t: dest                 # no native dialog in tests
+    assert apiA.export_controls_profile()["ok"]
+    bundle = dest.read_text(encoding="utf-8")
+
+    cfgB, iraB = mkcfg(tmp_path / "B", with_controls=False)
+    apiB = GuiApi(str(cfgB))
+    pv = apiB.preview_controls_import(bundle)
+    assert pv["ok"] and pv["bindingCount"] > 0 and pv["devices"]
+    assert apiB.import_controls_profile(bundle)["ok"]
+    written = iraB / "controls.cfg"
+    assert written.exists() and codec.decode_bytes(written.read_bytes())   # valid result
+    assert apiB.get_history()["items"][0]["message"].startswith("Imported controls profile")
+    assert not apiB.preview_controls_import("not a bundle")["ok"]
+
+
 def test_migrates_legacy_bare_keys_into_active_profile(cfg, corpus_cfg_bytes):
     # 1) legacy install: controls.cfg at the top level, no profiles yet
     (cfg.iracing_dir / "controls.cfg").write_bytes(corpus_cfg_bytes)
