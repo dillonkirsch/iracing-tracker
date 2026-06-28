@@ -119,6 +119,8 @@ class Tracker:
         sim_running: bool = False,
         car: str | None = None,
         track: str | None = None,
+        best_lap: float | None = None,
+        incidents: int | None = None,
     ) -> SnapshotResult:
         """Sync (a subset of) tracked files into the repo and commit if anything
         real changed. `names=None` means full scan, covering deletions too (FR-4).
@@ -143,6 +145,7 @@ class Tracker:
         meta = SnapshotMeta(
             trigger=trigger, files=changes, sim_running=sim_running,
             car=car, track=track, message=message, build=_build.current_build(),
+            best_lap=best_lap, incidents=incidents,
             time=datetime.now().astimezone().isoformat(timespec="seconds"),
         )
 

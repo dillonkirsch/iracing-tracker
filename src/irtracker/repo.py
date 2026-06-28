@@ -47,13 +47,15 @@ class SnapshotMeta:
     time: str = ""
     collapsed: bool = False
     build: str | None = None  # iRacing build active when this snapshot was taken
+    best_lap: float | None = None  # session best lap (seconds) at snapshot time
+    incidents: int | None = None   # the driver's incident count for the session
 
     def to_json(self) -> str:
         return json.dumps({
             "trigger": self.trigger, "files": self.files,
             "sim_running": self.sim_running, "car": self.car, "track": self.track,
             "message": self.message, "time": self.time, "collapsed": self.collapsed,
-            "build": self.build,
+            "build": self.build, "best_lap": self.best_lap, "incidents": self.incidents,
         }, ensure_ascii=False)
 
     @classmethod
@@ -64,7 +66,7 @@ class SnapshotMeta:
             sim_running=bool(d.get("sim_running")), car=d.get("car"),
             track=d.get("track"), message=d.get("message"),
             time=d.get("time", ""), collapsed=bool(d.get("collapsed")),
-            build=d.get("build"),
+            build=d.get("build"), best_lap=d.get("best_lap"), incidents=d.get("incidents"),
         )
 
     def context_label(self) -> str:

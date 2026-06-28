@@ -125,6 +125,14 @@ def _set_tracked_in_text(text: str, tracked: list) -> str:
     return f"{head_text}\n\n{blocks}"
 
 
+def _fmt_lap(seconds) -> str | None:
+    """Seconds -> '1:38.234' (or '38.234' for sub-minute), or None if no lap."""
+    if not isinstance(seconds, (int, float)) or seconds <= 0:
+        return None
+    m, s = divmod(float(seconds), 60)
+    return f"{int(m)}:{s:06.3f}" if m else f"{s:.3f}"
+
+
 def _pretty_action(name: str) -> str:
     """CamelCase action name -> spaced (mirrors the JS prettyAction)."""
     s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name)
@@ -202,6 +210,9 @@ class GuiApi:
             "knownGood": any(_is_known_good(t) for t in s.tags),
             "collapsed": s.meta.collapsed,
             "build": s.meta.build,
+            "bestLap": s.meta.best_lap,
+            "bestLapStr": _fmt_lap(s.meta.best_lap),
+            "incidents": s.meta.incidents,
         }
 
     # -- overview / dashboard ----------------------------------------------------
@@ -465,12 +476,13 @@ class GuiApi:
         if tracker is None:
             return _err(self._cfg_error or "could not load configuration")
         running = sim_running(tracker.cfg.sim_processes)
-        car = track = None
+        car = track = best_lap = incidents = None
         if running:
             ctx = ContextCache(tracker.cfg.state_dir).context
-            car, track = ctx.car, ctx.track
+            car, track, best_lap, incidents = ctx.car, ctx.track, ctx.best_lap, ctx.incidents
         result = tracker.take_snapshot("manual", message=(message or None),
-                                       sim_running=running, car=car, track=track)
+                                       sim_running=running, car=car, track=track,
+                                       best_lap=best_lap, incidents=incidents)
         if not result.committed:
             return _ok(created=False,
                        skippedIgnored=result.skipped_ignored,
@@ -708,13 +720,31 @@ class GuiApi:
                 if ended:
                     break
             files = sorted({f for g in group for f in g.meta.files if not is_sidecar(f)})
+            laps = [g.meta.best_lap for g in group
+                    if isinstance(g.meta.best_lap, (int, float)) and g.meta.best_lap > 0]
+            incs = [g.meta.incidents for g in group
+                    if isinstance(g.meta.incidents, (int, float))]
+            best_lap = min(laps) if laps else None
             sessions.append({
                 "car": car, "track": track,
                 "start": group[0].author_date, "end": group[-1].author_date,
                 "baselineRev": baseline, "endRev": group[-1].commit,
                 "count": len(group), "files": files,
+                "bestLap": best_lap, "bestLapStr": _fmt_lap(best_lap),
+                "incidents": max(incs) if incs else None,
             })
             i = j
+        # Personal best: fastest session lap per car+track gets a PB flag.
+        fastest: dict = {}
+        for s in sessions:
+            if s["bestLap"] is None:
+                continue
+            key = (s["car"], s["track"])
+            if key not in fastest or s["bestLap"] < fastest[key]:
+                fastest[key] = s["bestLap"]
+        for s in sessions:
+            s["isPB"] = (s["bestLap"] is not None
+                         and s["bestLap"] == fastest.get((s["car"], s["track"])))
         sessions.reverse()  # newest first
         return _ok(items=sessions)
 

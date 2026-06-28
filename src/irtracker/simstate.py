@@ -32,6 +32,8 @@ def sim_running(process_names: list[str]) -> bool:
 class SimContext:
     car: str | None = None
     track: str | None = None
+    best_lap: float | None = None   # session best lap in seconds
+    incidents: int | None = None    # driver incident count this session
     updated: str | None = None
 
 
@@ -48,6 +50,7 @@ class ContextCache:
         try:
             d = json.loads(self.path.read_text(encoding="utf-8"))
             return SimContext(car=d.get("car"), track=d.get("track"),
+                              best_lap=d.get("best_lap"), incidents=d.get("incidents"),
                               updated=d.get("updated"))
         except (OSError, json.JSONDecodeError):
             return SimContext()
@@ -57,6 +60,7 @@ class ContextCache:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps({
                 "car": self.context.car, "track": self.context.track,
+                "best_lap": self.context.best_lap, "incidents": self.context.incidents,
                 "updated": self.context.updated,
             }), encoding="utf-8")
         except OSError as exc:
@@ -94,14 +98,36 @@ class ContextCache:
                 config = weekend.get("TrackConfigName")
                 if track and config and str(config).lower() not in ("", "none", "null"):
                     track = f"{track} ({config})"
-            if car or track:
-                changed = (car, track) != (self.context.car, self.context.track)
+            # Session result so far: best lap (seconds) and incident count.
+            raw_best = ir["LapBestLapTime"]
+            best_lap = float(raw_best) if isinstance(raw_best, (int, float)) and raw_best > 0 else None
+            raw_inc = ir["PlayerCarMyIncidentCount"]
+            incidents = int(raw_inc) if isinstance(raw_inc, (int, float)) and raw_inc >= 0 else None
+            # New session? (different car/track, or the incident counter reset
+            # downward) -> drop the carried-over result so it repopulates fresh.
+            new_combo = (car and car != self.context.car) or (track and track != self.context.track)
+            inc_reset = (incidents is not None and self.context.incidents is not None
+                         and incidents < self.context.incidents)
+            if new_combo or inc_reset:
+                self.context.best_lap = None
+                self.context.incidents = None
+            prev = (self.context.car, self.context.track, self.context.best_lap, self.context.incidents)
+            if car or track or best_lap is not None or incidents is not None:
                 self.context.car = car or self.context.car
                 self.context.track = track or self.context.track
-                self.context.updated = datetime.now().astimezone().isoformat(timespec="seconds")
-                self._save()
-                if changed:
-                    log.info("sim context: %s @ %s", self.context.car, self.context.track)
+                if best_lap is not None:
+                    self.context.best_lap = best_lap
+                if incidents is not None:
+                    self.context.incidents = incidents
+                now = (self.context.car, self.context.track,
+                       self.context.best_lap, self.context.incidents)
+                if now != prev:
+                    self.context.updated = datetime.now().astimezone().isoformat(timespec="seconds")
+                    self._save()
+                    log.info("sim context: %s @ %s | best %.3fs · %sx",
+                             self.context.car, self.context.track,
+                             self.context.best_lap or 0.0,
+                             self.context.incidents if self.context.incidents is not None else "?")
         except Exception as exc:
             log.debug("SDK poll failed: %s", exc)
 

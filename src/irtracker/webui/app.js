@@ -911,6 +911,10 @@ async function showBackupDetail(rev) {
     <div class="card" style="padding:14px">
       <div style="font-weight:650;margin-bottom:4px">${esc(triggerLabel(s.trigger))}</div>
       <div class="muted" style="font-size:12.5px">${esc(fmtDate(s.date))}${s.build ? ` · iRacing build ${esc(s.build)}` : ""}</div>
+      ${(s.bestLapStr || s.incidents != null) ? `<div class="row-gap" style="margin-top:6px">
+        ${s.bestLapStr ? `<span class="bind key">${icon("clock")} ${esc(s.bestLapStr)}</span>` : ""}
+        ${s.incidents != null ? `<span class="bind ${s.incidents === 0 ? "axis" : "button"}">${s.incidents}x inc</span>` : ""}
+      </div>` : ""}
       ${s.contextLabel && s.contextLabel !== "manual edit" ? `<div class="tl-ctx" style="margin-top:8px">${icon("clock")} ${esc(s.contextLabel)}</div>` : ""}
       ${s.message ? `<div class="tl-msg">“${esc(s.message)}”</div>` : ""}
       <div class="tl-files" style="margin-top:10px">${fileChips(s.files)}${tags}</div>
@@ -1415,10 +1419,15 @@ function sessionCard(s, i) {
   const ctx = (s.car || s.track) ? [s.car, s.track].filter(Boolean).join(" @ ") : "Sim session (car/track unknown)";
   const files = [...new Set((s.files || []).map(fileLabel))];
   const sub = `${esc(sessionWhen(s))} · ${s.count} backup${s.count === 1 ? "" : "s"}${files.length ? " · " + esc(files.slice(0, 3).join(", ")) : ""}`;
+  const chips = [];
+  if (s.bestLapStr) chips.push(`<span class="bind key">${icon("clock")} ${esc(s.bestLapStr)}</span>`);
+  if (s.isPB) chips.push(`<span class="bind axis" title="Your fastest session at this track">Personal best</span>`);
+  if (s.incidents != null) chips.push(`<span class="bind ${s.incidents === 0 ? "axis" : "button"}" title="Incident points this session">${s.incidents}x inc</span>`);
+  const chipRow = chips.length ? `<div class="row-gap" style="margin-top:7px">${chips.join("")}</div>` : "";
   return `<div class="card" style="margin-bottom:12px;padding:0">
     <div class="spread" data-action="toggle-session" data-i="${i}" style="cursor:pointer;padding:16px 18px">
       <div><div style="font-weight:650;font-size:15px">${icon("clock")} ${esc(ctx)}</div>
-        <div class="muted" style="font-size:12.5px;margin-top:3px">${sub}</div></div>
+        <div class="muted" style="font-size:12.5px;margin-top:3px">${sub}</div>${chipRow}</div>
       <span class="btn btn-sm btn-ghost">View changes</span>
     </div>
     <div id="sess-${i}" style="padding:0 18px"></div>

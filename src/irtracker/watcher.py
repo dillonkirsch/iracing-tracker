@@ -144,10 +144,12 @@ class Watcher:
         sim_involved = running or trigger == "sim_exit"
         car = self.context.context.car if sim_involved else None
         track = self.context.context.track if sim_involved else None
+        best_lap = self.context.context.best_lap if sim_involved else None
+        incidents = self.context.context.incidents if sim_involved else None
         try:
             result = self.tracker.take_snapshot(
                 trigger, names=names, sim_running=running and trigger != "sim_exit",
-                car=car, track=track)
+                car=car, track=track, best_lap=best_lap, incidents=incidents)
         except Exception:
             log.exception("snapshot failed (trigger=%s)", trigger)
             return
