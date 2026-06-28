@@ -161,6 +161,8 @@ class Watcher:
                 notify.snapshot_toast(
                     result.files, TRIGGER_LABELS.get(trigger, trigger),
                     meta.context_label())
+        from irtracker import overlay
+        overlay.refresh(self.cfg)  # keep the in-sim overlay file current (opt-in)
 
     def _heartbeat(self, paused: bool, running: bool) -> None:
         self.cfg.state_dir.mkdir(parents=True, exist_ok=True)
@@ -217,6 +219,8 @@ class Watcher:
         self._sim_was_running = self._sim_running_now()
         self._heartbeat(paused=_paused_flag(self.cfg).exists(),
                         running=self._sim_was_running)
+        from irtracker import overlay
+        overlay.refresh(self.cfg)  # write the overlay once at startup (opt-in)
 
         from watchdog.observers import Observer
 

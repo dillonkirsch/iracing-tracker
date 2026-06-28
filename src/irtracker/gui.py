@@ -296,6 +296,16 @@ class GuiApi:
                 protected.append({"pattern": tp.pattern, "policy": tp.policy})
         tracked = [{"pattern": tp.pattern, "policy": tp.policy} for tp in cfg.tracked]
 
+        # Keep the in-sim overlay file fresh (reuses the data computed above).
+        from irtracker import overlay
+        if overlay.is_enabled(cfg):
+            overlay.write(cfg, {
+                "profile": active_control_profile(cfg.iracing_dir),
+                "pending": len(pending), "backups": snapshot_count,
+                "lastBackup": latest["date"] if latest else None,
+                "build": current_build,
+            })
+
         return _ok(
             configPath=str(self._config_arg or config_path()),
             iracingDir=str(cfg.iracing_dir),
@@ -315,6 +325,8 @@ class GuiApi:
             currentBuild=current_build,
             buildUpdate=build_update,
             discord=self._discord_prefs(cfg),
+            overlayEnabled=bool(self._ui_prefs(cfg).get("overlay_enabled")),
+            overlayPath=str(cfg.state_dir / "overlay.txt"),
             snapshotCount=snapshot_count,
             protected=protected,
             trayEnabled=bool(self._ui_prefs(cfg).get("tray", True)),
@@ -1657,6 +1669,24 @@ class GuiApi:
         except OSError as exc:
             return _err(str(exc))
         return _ok(tray=bool(on))
+
+    def set_overlay_enabled(self, on) -> dict:
+        cfg = self._config()
+        if cfg is None:
+            return _err(self._cfg_error or "could not load configuration")
+        prefs = self._ui_prefs(cfg)
+        prefs["overlay_enabled"] = bool(on)
+        try:
+            cfg.state_dir.mkdir(parents=True, exist_ok=True)
+            (cfg.state_dir / "ui.json").write_text(json.dumps(prefs, indent=2), encoding="utf-8")
+        except OSError as exc:
+            return _err(str(exc))
+        from irtracker import overlay
+        if on:
+            overlay.refresh(cfg)   # write it now so the file exists immediately
+        else:
+            overlay.clear(cfg)
+        return _ok(enabled=bool(on), path=str(overlay.paths(cfg)[1]))
 
     def ack_build(self, build: str) -> dict:
         """Dismiss the 'iRacing updated' notice for a given build."""

@@ -1695,6 +1695,21 @@ function renderSettings() {
       </div>
     </div>
 
+    <p class="section-label" style="margin-top:22px">In-sim overlay</p>
+    <div class="card">
+      <p class="muted mt-0" style="font-size:12.5px">Write a small status file that overlay tools (SimHub, RaceLab, …) can show on-screen while you drive — which control profile is active and whether it's backed up.</p>
+      <div class="toggle-row" style="border:0;padding:10px 0 6px">
+        <div><div class="label">Emit overlay status file</div>
+          <div class="desc">Refreshes after each backup. Point your overlay tool at the file below.</div></div>
+        <div class="spacer"></div>
+        <label class="toggle"><input type="checkbox" id="tgOverlay" ${o.overlayEnabled ? "checked" : ""}><span class="track"></span></label>
+      </div>
+      ${o.overlayEnabled ? `<div class="row-gap" style="margin-top:4px">
+        <input class="search" readonly value="${esc(o.overlayPath || "")}" style="margin:0;flex:1" onclick="this.select()">
+        <button class="btn btn-sm" data-action="copy-overlay-path">Copy path</button>
+      </div>` : ""}
+    </div>
+
     <p class="section-label" style="margin-top:22px">Files being protected</p>
     <div class="card">
       <p class="muted mt-0" style="font-size:12.5px">Choose which iRacing files this app backs up. “Don’t track” stops backing a file up; “group repeats” squashes rapid repeated tweaks into one history entry. Changes apply to new backups within a minute — no need to restart auto-backup.</p>
@@ -1739,6 +1754,7 @@ function renderSettings() {
   $("#tgWatch").addEventListener("change", onToggleWatch);
   $("#tgAutostart").addEventListener("change", onToggleAutostart);
   $("#tgTray").addEventListener("change", onToggleTray);
+  $("#tgOverlay").addEventListener("change", onToggleOverlay);
   renderTrackedEditor();
 }
 
@@ -1792,6 +1808,20 @@ async function onToggleTray(e) {
   if (!r.ok) { toast(r.error, "bad"); e.target.checked = !on; return; }
   if (state.overview) state.overview.trayEnabled = on;
   toast(`System tray ${on ? "on" : "off"} — applies next time you open the app.`, "good");
+}
+
+async function doCopyOverlayPath() {
+  try { await navigator.clipboard.writeText((state.overview || {}).overlayPath || ""); toast("Path copied.", "good"); }
+  catch (e) { toast("Select the path to copy it.", "bad"); }
+}
+
+async function onToggleOverlay(e) {
+  const on = e.target.checked;
+  const r = await api("set_overlay_enabled", on);
+  if (!r.ok) { toast(r.error, "bad"); e.target.checked = !on; return; }
+  if (state.overview) state.overview.overlayEnabled = on;
+  toast(on ? "Overlay status file is on." : "Overlay status file is off.", "good");
+  renderSettings();  // show/hide the file path
 }
 
 async function doExportDocsMd() {
@@ -2181,6 +2211,7 @@ document.addEventListener("click", (e) => {
   if (a === "docs-pdf") return doExportDocsPdf();
   if (a === "discord-save") return doDiscordSave();
   if (a === "discord-test") return doDiscordTest();
+  if (a === "copy-overlay-path") return doCopyOverlayPath();
   if (a === "tracked-add") return doTrackedAdd();
   if (a === "tracked-remove") return doTrackedRemove(+btn.dataset.i);
   if (a === "tracked-save") return doTrackedSave();
