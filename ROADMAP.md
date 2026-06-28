@@ -56,14 +56,6 @@ A running wish-list for iRacing Config Tracker. Ratings are rough estimates:
 
 ---
 
-## 🩺 Safety & diagnostics
-
-| Feature | Value | Effort | Foundation / notes |
-|---|---|---|---|
-| **Orphaned-file cleanup** — detect files in `Documents\iRacing` no longer used by the current build / uninstalled content. | Low–Med | Medium | Hard to know "unused" reliably. |
-
----
-
 ## 🔬 Long-term / research
 
 | Feature | Value | Effort | Foundation / notes |
